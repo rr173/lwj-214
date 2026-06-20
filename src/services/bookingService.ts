@@ -289,11 +289,10 @@ export async function updateBooking(id: string, input: UpdateBookingInput) {
     }
   }
 
-  if (input.attendeeCount !== undefined) {
-    const attendeeErr = validateAttendeeCount(input.attendeeCount, room.capacity);
-    if (attendeeErr) {
-      return { success: false, errors: [attendeeErr] };
-    }
+  const effectiveAttendeeCount = input.attendeeCount !== undefined ? input.attendeeCount : existingBooking.attendeeCount;
+  const attendeeErr = validateAttendeeCount(effectiveAttendeeCount, room.capacity);
+  if (attendeeErr) {
+    return { success: false, errors: [attendeeErr] };
   }
 
   if (input.roomNumber || input.date || input.startTime || input.endTime) {

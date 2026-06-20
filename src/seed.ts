@@ -137,7 +137,7 @@ async function main() {
   console.log('\n预置数据完成！');
   console.log(`会议室数量: ${rooms.length}`);
   console.log(`预约记录数量: ${bookings.length}`);
-  console.log(`\n今日(${today})预约: ${bookings.filter(b => b.date === today).length}条`);
+  console.log(`今日(${today})预约: ${bookings.filter(b => b.date === today).length}条`);
   console.log(`明日(${tomorrow})预约: ${bookings.filter(b => b.date === tomorrow).length}条`);
   console.log(`已取消预约: ${bookings.filter(b => b.isCancelled).length}条`);
 }
