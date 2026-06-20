@@ -1,0 +1,56 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model MeetingRoom {
+  id           String              @id @default(uuid())
+  roomNumber   String              @unique
+  name         String
+  capacity     Int
+  floor        Int
+  isActive     Boolean             @default(true)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  facilities   RoomFacility[]
+  bookings     Booking[]
+}
+
+model Facility {
+  id         String         @id @default(uuid())
+  name       String         @unique
+  rooms      RoomFacility[]
+}
+
+model RoomFacility {
+  roomId     String
+  facilityId String
+  room       MeetingRoom @relation(fields: [roomId], references: [id])
+  facility   Facility    @relation(fields: [facilityId], references: [id])
+
+  @@id([roomId, facilityId])
+}
+
+model Booking {
+  id              String    @id @default(uuid())
+  bookerName      String
+  roomId          String
+  roomNumber      String
+  date            String
+  startTime       String
+  endTime         String
+  attendeeCount   Int
+  topic           String
+  isCancelled     Boolean   @default(false)
+  cancelledAt     DateTime?
+  cancelReason    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  room            MeetingRoom @relation(fields: [roomId], references: [id])
+}

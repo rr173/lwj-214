@@ -1,10 +1,10 @@
 node_modules
 dist
+.git
+.gitignore
+*.md
 .env
 *.db
 *.db-journal
 .DS_Store
-
-# 训练记录
-训练记录.md
-*.xlsx
+npm-debug.log

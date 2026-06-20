@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  meeting-room-api:
+    build: .
+    container_name: meeting-room-booking
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=file:/app/prisma/dev.db
+      - PORT=3000
+      - NODE_ENV=production
+    volumes:
+      - meeting-room-data:/app/prisma
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  meeting-room-data:
