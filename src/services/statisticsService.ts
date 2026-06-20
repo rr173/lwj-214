@@ -2,7 +2,6 @@ import prisma from '../prisma';
 import { parse, differenceInDays, format, isAfter, isBefore } from 'date-fns';
 import { timeToMinutes, WORK_START, WORK_END } from '../utils/time';
 import { isValidDateFormat } from '../utils/time';
-import { queryRooms } from './roomService';
 import type { Booking, MeetingRoom } from '@prisma/client';
 
 export interface StatisticsInput {
@@ -74,7 +73,15 @@ export async function getWeeklyStatistics(input: StatisticsInput) {
     };
   }
 
-  const rooms = await queryRooms();
+  const allRooms = await prisma.meetingRoom.findMany({
+    where: {
+      splitStatus: { not: 'sub' }
+    },
+    include: {
+      subRooms: true
+    }
+  });
+
   const allBookings = await prisma.booking.findMany({
     where: {
       date: { gte: input.startDate, lte: input.endDate }
@@ -87,12 +94,11 @@ export async function getWeeklyStatistics(input: StatisticsInput) {
 
   const roomStats: RoomStatistics[] = [];
 
-  for (const room of rooms) {
-    const roomBookings = allBookings.filter(b => b.roomId === room.id);
-    const cancelledBookings = roomBookings.filter(b => b.isCancelled && !b.isReleased);
-    const noShowReleasedBookings = roomBookings.filter(b => b.isReleased);
-    const waitlistConvertedBookings = roomBookings.filter(b => b.convertedFromWaitlistId !== null && !b.isCancelled);
-    const activeBookings = roomBookings.filter(b => !b.isCancelled);
+  function calculateRoomStats(room: MeetingRoom & { subRooms?: MeetingRoom[] }, bookings: Booking[]): RoomStatistics {
+    const cancelledBookings = bookings.filter(b => b.isCancelled && !b.isReleased);
+    const noShowReleasedBookings = bookings.filter(b => b.isReleased);
+    const waitlistConvertedBookings = bookings.filter(b => b.convertedFromWaitlistId !== null && !b.isCancelled);
+    const activeBookings = bookings.filter(b => !b.isCancelled);
 
     let totalBookedMinutes = 0;
     const hourCounts = new Map<string, number>();
@@ -119,7 +125,7 @@ export async function getWeeklyStatistics(input: StatisticsInput) {
     const totalAttendees = activeBookings.reduce((sum, b) => sum + b.attendeeCount, 0);
     const averageAttendees = activeBookings.length > 0 ? totalAttendees / activeBookings.length : 0;
 
-    const totalBookings = roomBookings.length;
+    const totalBookings = bookings.length;
     const cancellationRate = totalBookings > 0 ? (cancelledBookings.length / totalBookings) * 100 : 0;
     const effectiveBookings = activeBookings.length;
     const effectiveCancellationRate = totalBookings > 0
@@ -131,7 +137,7 @@ export async function getWeeklyStatistics(input: StatisticsInput) {
       .slice(0, 3)
       .map(([hour, count]) => ({ hour, count }));
 
-    roomStats.push({
+    return {
       roomNumber: room.roomNumber,
       roomName: room.name,
       capacity: room.capacity,
@@ -148,7 +154,18 @@ export async function getWeeklyStatistics(input: StatisticsInput) {
       waitlistConvertedBookings: waitlistConvertedBookings.length,
       effectiveBookings,
       effectiveCancellationRate: Math.round(effectiveCancellationRate * 100) / 100
-    });
+    };
+  }
+
+  for (const room of allRooms) {
+    const roomIds = [room.id];
+    if (room.subRooms && room.subRooms.length > 0) {
+      roomIds.push(...room.subRooms.map(sr => sr.id));
+    }
+
+    const roomBookings = allBookings.filter(b => roomIds.includes(b.roomId));
+    const stats = calculateRoomStats(room, roomBookings);
+    roomStats.push(stats);
   }
 
   const allCancelled = allBookings.filter(b => b.isCancelled && !b.isReleased);
@@ -162,7 +179,7 @@ export async function getWeeklyStatistics(input: StatisticsInput) {
       endDate: input.endDate,
       totalDays
     },
-    totalRooms: rooms.length,
+    totalRooms: allRooms.length,
     totalBookings: allBookings.length,
     totalActiveBookings: allActive.length,
     totalCancelledBookings: allCancelled.length,

@@ -8,18 +8,22 @@ datasource db {
 }
 
 model MeetingRoom {
-  id           String              @id @default(uuid())
-  roomNumber   String              @unique
-  name         String
-  capacity     Int
-  floor        Int
-  isActive     Boolean             @default(true)
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
+  id             String              @id @default(uuid())
+  roomNumber     String              @unique
+  name           String
+  capacity       Int
+  floor          Int
+  isActive       Boolean             @default(true)
+  splitStatus    String              @default("normal")
+  parentRoomId   String?
+  parentRoom     MeetingRoom?        @relation("RoomSplits", fields: [parentRoomId], references: [id])
+  subRooms       MeetingRoom[]       @relation("RoomSplits")
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
 
-  facilities   RoomFacility[]
-  bookings     Booking[]
-  waitlists    Waitlist[]
+  facilities     RoomFacility[]
+  bookings       Booking[]
+  waitlists      Waitlist[]
 }
 
 model Facility {

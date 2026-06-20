@@ -4,6 +4,8 @@ import type { MeetingRoom, Facility } from '@prisma/client';
 
 export interface RoomWithFacilities extends MeetingRoom {
   facilities: string[];
+  splitStatus: string;
+  parentRoomId: string | null;
 }
 
 export interface CreateRoomInput {

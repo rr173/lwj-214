@@ -56,7 +56,9 @@ const rooms: SeedRoom[] = [
   { roomNumber: 'S102', name: '小型会议室2', capacity: 4, floor: 1, facilities: ['白板'] },
   { roomNumber: 'M201', name: '中型会议室1', capacity: 8, floor: 2, facilities: ['投影仪', '白板'] },
   { roomNumber: 'M202', name: '中型会议室2', capacity: 8, floor: 2, facilities: ['投影仪', '白板'] },
-  { roomNumber: 'L301', name: '大型会议室', capacity: 20, floor: 3, facilities: ['投影仪', '白板', '视频会议系统', '电话会议'] }
+  { roomNumber: 'L301', name: '大型会议室(已拆分)', capacity: 20, floor: 3, facilities: ['投影仪', '白板', '视频会议系统', '电话会议'] },
+  { roomNumber: 'L301-A', name: '大型会议室A区', capacity: 10, floor: 3, facilities: ['投影仪', '白板', '视频会议系统', '电话会议'] },
+  { roomNumber: 'L301-B', name: '大型会议室B区', capacity: 10, floor: 3, facilities: ['投影仪', '白板', '视频会议系统', '电话会议'] }
 ];
 
 const bookings: SeedBooking[] = [
@@ -67,14 +69,15 @@ const bookings: SeedBooking[] = [
   { bookerName: '孙七', roomNumber: 'M201', date: today, startTime: '14:00', endTime: '15:30', attendeeCount: 5, topic: '代码审查' },
   { bookerName: '周八', roomNumber: 'M202', date: today, startTime: '09:00', endTime: '11:00', attendeeCount: 7, topic: '产品发布会准备' },
   { bookerName: '吴九', roomNumber: 'M202', date: today, startTime: '13:00', endTime: '14:00', attendeeCount: 3, topic: '快速同步' },
-  { bookerName: '郑十', roomNumber: 'L301', date: today, startTime: '09:00', endTime: '12:00', attendeeCount: 15, topic: '全员大会' },
-  { bookerName: '陈十一', roomNumber: 'L301', date: today, startTime: '14:00', endTime: '16:00', attendeeCount: 12, topic: '客户演示' },
   { bookerName: '林十二', roomNumber: 'S101', date: today, startTime: '16:00', endTime: '17:00', attendeeCount: 2, topic: '已取消的会议', isCancelled: true, cancelReason: '时间冲突' },
   { bookerName: '张三', roomNumber: 'S101', date: tomorrow, startTime: '09:00', endTime: '10:00', attendeeCount: 3, topic: '项目跟进' },
   { bookerName: '李四', roomNumber: 'M201', date: tomorrow, startTime: '10:00', endTime: '11:30', attendeeCount: 6, topic: '技术方案评审' },
   { bookerName: '王五', roomNumber: 'M202', date: tomorrow, startTime: '14:00', endTime: '16:00', attendeeCount: 8, topic: '季度总结' },
-  { bookerName: '赵六', roomNumber: 'L301', date: tomorrow, startTime: '09:00', endTime: '12:00', attendeeCount: 18, topic: '战略规划会议' },
   { bookerName: '孙七', roomNumber: 'S102', date: tomorrow, startTime: '15:00', endTime: '16:00', attendeeCount: 2, topic: '面试', isCancelled: true, cancelReason: '候选人改期' },
+  { bookerName: '钱一', roomNumber: 'L301-A', date: tomorrow, startTime: '09:00', endTime: '10:30', attendeeCount: 8, topic: '产品评审会' },
+  { bookerName: '钱二', roomNumber: 'L301-A', date: tomorrow, startTime: '14:00', endTime: '16:00', attendeeCount: 6, topic: '技术分享会' },
+  { bookerName: '孙三', roomNumber: 'L301-B', date: tomorrow, startTime: '10:00', endTime: '11:30', attendeeCount: 7, topic: '项目启动会' },
+  { bookerName: '李四', roomNumber: 'L301-B', date: tomorrow, startTime: '15:00', endTime: '17:00', attendeeCount: 9, topic: '客户沟通会' },
 ];
 
 const demoBookings: SeedBooking[] = [
@@ -182,6 +185,43 @@ async function main() {
 
   const allRooms = await prisma.meetingRoom.findMany();
   const roomMap = new Map(allRooms.map(r => [r.roomNumber, r.id]));
+
+  const l301 = allRooms.find(r => r.roomNumber === 'L301');
+  const l301a = allRooms.find(r => r.roomNumber === 'L301-A');
+  const l301b = allRooms.find(r => r.roomNumber === 'L301-B');
+
+  if (l301 && l301.splitStatus === 'normal') {
+    await prisma.meetingRoom.update({
+      where: { id: l301.id },
+      data: {
+        splitStatus: 'split',
+        isActive: false
+      }
+    });
+    console.log('设置 L301 为已拆分状态');
+  }
+
+  if (l301 && l301a && l301a.parentRoomId !== l301.id) {
+    await prisma.meetingRoom.update({
+      where: { id: l301a.id },
+      data: {
+        splitStatus: 'sub',
+        parentRoomId: l301.id
+      }
+    });
+    console.log('设置 L301-A 为 L301 的子区');
+  }
+
+  if (l301 && l301b && l301b.parentRoomId !== l301.id) {
+    await prisma.meetingRoom.update({
+      where: { id: l301b.id },
+      data: {
+        splitStatus: 'sub',
+        parentRoomId: l301.id
+      }
+    });
+    console.log('设置 L301-B 为 L301 的子区');
+  }
 
   const allBookings = [...bookings, ...demoBookings];
 
