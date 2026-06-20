@@ -5,6 +5,7 @@ import recommendationRouter from './routes/recommendation';
 import conflictsRouter from './routes/conflicts';
 import statisticsRouter from './routes/statistics';
 import waitlistRouter from './routes/waitlist';
+import visitorsRouter from './routes/visitors';
 import { startScheduler, stopScheduler } from './services/schedulerService';
 import prisma from './prisma';
 
@@ -54,6 +55,14 @@ app.get('/', (req, res) => {
       },
       statistics: {
         'GET /api/statistics/weekly?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD': '周报统计（含未签到释放、候补转正等指标）'
+      },
+      visitors: {
+        'POST /api/visitors/register': '访客登记',
+        'POST /api/visitors/checkin': '访客签到（凭签到码）',
+        'GET /api/visitors/booking/:bookingId': '查询某个预约的访客列表',
+        'GET /api/visitors/date/:date?status=pending|checked_in|invalidated': '查询某天的访客记录（支持按状态筛选）',
+        'GET /api/visitors/host/:hostName': '按接待人查询访客',
+        'GET /api/visitors/:id': '查询访客详情'
       }
     }
   });
@@ -65,6 +74,7 @@ app.use('/api/recommendation', recommendationRouter);
 app.use('/api/conflicts', conflictsRouter);
 app.use('/api/statistics', statisticsRouter);
 app.use('/api/waitlist', waitlistRouter);
+app.use('/api/visitors', visitorsRouter);
 
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error(err.stack);

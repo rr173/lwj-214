@@ -1,5 +1,6 @@
 import prisma from '../prisma';
 import { processWaitlistForSlot } from './waitlistService';
+import { invalidateVisitorsByBookingId } from './visitorService';
 
 const CHECK_IN_BEFORE_MINUTES = 10;
 const CHECK_IN_AFTER_MINUTES = 15;
@@ -96,6 +97,8 @@ export async function releaseNoShowBookings(): Promise<any[]> {
         }
       });
 
+      const invalidatedVisitors = await invalidateVisitorsByBookingId(booking.id, '关联预约未签到自动释放');
+
       const conversions = await processWaitlistForSlot(
         booking.roomId,
         booking.date,
@@ -109,7 +112,8 @@ export async function releaseNoShowBookings(): Promise<any[]> {
         bookerName: booking.bookerName,
         roomNumber: booking.roomNumber,
         timeSlot: `${booking.startTime}-${booking.endTime}`,
-        conversions
+        conversions,
+        invalidatedVisitors
       });
     }
   }

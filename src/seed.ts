@@ -43,6 +43,21 @@ interface SeedWaitlist {
   convertedBookingId?: string | null;
 }
 
+interface SeedVisitor {
+  visitorName: string;
+  phoneLastFour: string;
+  visitReason: string;
+  hostName: string;
+  bookingTopic: string;
+  bookingDate: string;
+  bookingStartTime: string;
+  bookingEndTime: string;
+  status: 'pending' | 'checked_in' | 'invalidated';
+  checkInCode: string;
+  checkInTime?: Date | null;
+  invalidatedReason?: string | null;
+}
+
 interface SeedBookingLog {
   date: string;
   type: string;
@@ -144,6 +159,47 @@ const demoWaitlists: SeedWaitlist[] = [
     topic: '待补位-项目复盘',
     status: 'pending'
   },
+];
+
+const demoVisitors: SeedVisitor[] = [
+  {
+    visitorName: '客户代表-王总',
+    phoneLastFour: '8888',
+    visitReason: '项目合作洽谈',
+    hostName: '张三',
+    bookingTopic: '项目周会',
+    bookingDate: today,
+    bookingStartTime: '09:00',
+    bookingEndTime: '10:00',
+    status: 'checked_in',
+    checkInCode: '123456',
+    checkInTime: new Date()
+  },
+  {
+    visitorName: '面试者-李明',
+    phoneLastFour: '6666',
+    visitReason: '技术面试',
+    hostName: '张三',
+    bookingTopic: '项目跟进',
+    bookingDate: tomorrow,
+    bookingStartTime: '09:00',
+    bookingEndTime: '10:00',
+    status: 'pending',
+    checkInCode: '654321'
+  },
+  {
+    visitorName: '供应商-陈经理',
+    phoneLastFour: '9999',
+    visitReason: '设备维护',
+    hostName: '林十二',
+    bookingTopic: '已取消的会议',
+    bookingDate: today,
+    bookingStartTime: '16:00',
+    bookingEndTime: '17:00',
+    status: 'invalidated',
+    checkInCode: '111111',
+    invalidatedReason: '关联预约已取消'
+  }
 ];
 
 async function ensureFacility(name: string): Promise<string> {
@@ -461,16 +517,73 @@ async function main() {
     }
   }
 
+  for (const visitor of demoVisitors) {
+    const booking = await prisma.booking.findFirst({
+      where: {
+        topic: visitor.bookingTopic,
+        date: visitor.bookingDate,
+        startTime: visitor.bookingStartTime,
+        endTime: visitor.bookingEndTime,
+        bookerName: visitor.hostName
+      }
+    });
+
+    if (booking) {
+      const existingVisitor = await prisma.visitor.findFirst({
+        where: {
+          visitorName: visitor.visitorName,
+          bookingId: booking.id
+        }
+      });
+
+      if (!existingVisitor) {
+        const data: any = {
+          visitorName: visitor.visitorName,
+          phoneLastFour: visitor.phoneLastFour,
+          visitReason: visitor.visitReason,
+          hostName: visitor.hostName,
+          bookingId: booking.id,
+          checkInCode: visitor.checkInCode,
+          status: visitor.status,
+          date: booking.date,
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+          roomNumber: booking.roomNumber
+        };
+
+        if (visitor.status === 'checked_in' && visitor.checkInTime) {
+          data.checkInTime = visitor.checkInTime;
+        }
+
+        if (visitor.status === 'invalidated' && visitor.invalidatedReason) {
+          data.invalidatedAt = new Date();
+          data.invalidatedReason = visitor.invalidatedReason;
+        }
+
+        await prisma.visitor.create({ data });
+        console.log(`创建访客: ${visitor.visitorName} - ${visitor.hostName} (${visitor.status})`);
+      } else {
+        console.log(`访客已存在: ${visitor.visitorName}`);
+      }
+    } else {
+      console.log(`跳过访客，关联预约不存在: ${visitor.visitorName} - ${visitor.bookingTopic}`);
+    }
+  }
+
   console.log('\n预置数据完成！');
   console.log(`会议室数量: ${rooms.length}`);
   console.log(`预约记录数量: ${allBookings.length}`);
   console.log(`候补记录数量: ${demoWaitlists.length}`);
+  console.log(`访客记录数量: ${demoVisitors.length}`);
   console.log(`今日(${today})预约: ${allBookings.filter(b => b.date === today).length}条`);
   console.log(`明日(${tomorrow})预约: ${allBookings.filter(b => b.date === tomorrow).length}条`);
   console.log(`已取消预约: ${allBookings.filter(b => b.isCancelled).length}条`);
   console.log(`已释放预约(未签到): ${allBookings.filter(b => b.isReleased).length}条`);
   console.log(`候补转正: ${demoWaitlists.filter(w => w.status === 'converted').length}条`);
   console.log(`待补位: ${demoWaitlists.filter(w => w.status === 'pending').length}条`);
+  console.log(`已签到访客: ${demoVisitors.filter(v => v.status === 'checked_in').length}条`);
+  console.log(`待签到访客: ${demoVisitors.filter(v => v.status === 'pending').length}条`);
+  console.log(`已失效访客: ${demoVisitors.filter(v => v.status === 'invalidated').length}条`);
 }
 
 main()

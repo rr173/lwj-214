@@ -7,6 +7,7 @@ import {
 } from '../utils/validation';
 import { getRoomByNumber } from './roomService';
 import { processWaitlistForSlot, processWaitlistForRoom } from './waitlistService';
+import { invalidateVisitorsByBookingId } from './visitorService';
 import type { MeetingRoom, Booking } from '@prisma/client';
 
 export interface CreateBookingInput {
@@ -240,6 +241,8 @@ export async function cancelBooking(id: string, cancelReason: string) {
     }
   });
 
+  const invalidatedVisitors = await invalidateVisitorsByBookingId(booking.id, '关联预约已取消');
+
   const conversions = await processWaitlistForSlot(
     booking.roomId,
     booking.date,
@@ -248,7 +251,7 @@ export async function cancelBooking(id: string, cancelReason: string) {
     '预约取消'
   );
 
-  return { success: true, data: updated, waitlistConversions: conversions };
+  return { success: true, data: updated, waitlistConversions: conversions, invalidatedVisitors };
 }
 
 export async function updateBooking(id: string, input: UpdateBookingInput) {

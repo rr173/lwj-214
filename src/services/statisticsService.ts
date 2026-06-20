@@ -31,6 +31,8 @@ export interface RoomStatistics {
   waitlistConvertedBookings: number;
   effectiveBookings: number;
   effectiveCancellationRate: number;
+  totalVisitors: number;
+  dailyAverageVisitors: number;
 }
 
 export async function getWeeklyStatistics(input: StatisticsInput) {
@@ -88,13 +90,23 @@ export async function getWeeklyStatistics(input: StatisticsInput) {
     }
   });
 
+  const allVisitors = await prisma.visitor.findMany({
+    where: {
+      date: { gte: input.startDate, lte: input.endDate }
+    }
+  });
+
   const totalDays = daysDiff + 1;
   const dailyWorkingMinutes = timeToMinutes(WORK_END) - timeToMinutes(WORK_START);
   const totalWorkingMinutes = totalDays * dailyWorkingMinutes;
 
   const roomStats: RoomStatistics[] = [];
 
-  function calculateRoomStats(room: MeetingRoom & { subRooms?: MeetingRoom[] }, bookings: Booking[]): RoomStatistics {
+  function calculateRoomStats(
+    room: MeetingRoom & { subRooms?: MeetingRoom[] },
+    bookings: Booking[],
+    visitors: any[]
+  ): RoomStatistics {
     const cancelledBookings = bookings.filter(b => b.isCancelled && !b.isReleased);
     const noShowReleasedBookings = bookings.filter(b => b.isReleased);
     const waitlistConvertedBookings = bookings.filter(b => b.convertedFromWaitlistId !== null && !b.isCancelled);
@@ -132,6 +144,9 @@ export async function getWeeklyStatistics(input: StatisticsInput) {
       ? ((cancelledBookings.length + noShowReleasedBookings.length) / totalBookings) * 100
       : 0;
 
+    const totalVisitors = visitors.length;
+    const dailyAverageVisitors = totalDays > 0 ? totalVisitors / totalDays : 0;
+
     const sortedHours = Array.from(hourCounts.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 3)
@@ -153,7 +168,9 @@ export async function getWeeklyStatistics(input: StatisticsInput) {
       noShowReleasedBookings: noShowReleasedBookings.length,
       waitlistConvertedBookings: waitlistConvertedBookings.length,
       effectiveBookings,
-      effectiveCancellationRate: Math.round(effectiveCancellationRate * 100) / 100
+      effectiveCancellationRate: Math.round(effectiveCancellationRate * 100) / 100,
+      totalVisitors,
+      dailyAverageVisitors: Math.round(dailyAverageVisitors * 100) / 100
     };
   }
 
@@ -164,7 +181,11 @@ export async function getWeeklyStatistics(input: StatisticsInput) {
     }
 
     const roomBookings = allBookings.filter(b => roomIds.includes(b.roomId));
-    const stats = calculateRoomStats(room, roomBookings);
+    const roomVisitorList = allVisitors.filter(v => {
+      const booking = allBookings.find(b => b.id === v.bookingId);
+      return booking && roomIds.includes(booking.roomId);
+    });
+    const stats = calculateRoomStats(room, roomBookings, roomVisitorList);
     roomStats.push(stats);
   }
 
@@ -185,6 +206,10 @@ export async function getWeeklyStatistics(input: StatisticsInput) {
     totalCancelledBookings: allCancelled.length,
     totalNoShowReleasedBookings: allNoShowReleased.length,
     totalWaitlistConvertedBookings: allWaitlistConverted.length,
+    totalVisitors: allVisitors.length,
+    overallDailyAverageVisitors: totalDays > 0
+      ? Math.round((allVisitors.length / totalDays) * 100) / 100
+      : 0,
     overallCancellationRate: allBookings.length > 0
       ? Math.round((allCancelled.length / allBookings.length) * 10000) / 100
       : 0,

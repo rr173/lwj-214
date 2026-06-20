@@ -64,6 +64,7 @@ model Booking {
 
   room                     MeetingRoom @relation(fields: [roomId], references: [id])
   bookingLogs              BookingLog[]
+  visitors                 Visitor[]
 }
 
 model Waitlist {
@@ -86,6 +87,28 @@ model Waitlist {
 
   room                 MeetingRoom @relation(fields: [roomId], references: [id])
   logs                 BookingLog[]
+}
+
+model Visitor {
+  id               String    @id @default(uuid())
+  visitorName      String
+  phoneLastFour    String
+  visitReason      String
+  hostName         String
+  bookingId        String
+  checkInCode      String    @unique
+  status           String    @default("pending")
+  checkInTime      DateTime?
+  invalidatedAt    DateTime?
+  invalidatedReason String?
+  date             String
+  startTime        String
+  endTime          String
+  roomNumber       String
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  booking          Booking   @relation(fields: [bookingId], references: [id])
 }
 
 model BookingLog {
