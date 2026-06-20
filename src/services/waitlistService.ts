@@ -2,7 +2,7 @@ import prisma from '../prisma';
 import { isTimeOverlap } from '../utils/time';
 import { validateDate, validateTimeRange, validateAttendeeCount, validateBookerName, validateTopic, ValidationError } from '../utils/validation';
 import { getRoomByNumber } from './roomService';
-import { checkRoomConflicts } from './bookingService';
+import { checkRoomConflicts, checkUserConflicts } from './bookingService';
 
 export interface CreateWaitlistInput {
   bookerName: string;
@@ -103,6 +103,14 @@ export async function createWaitlist(input: CreateWaitlistInput) {
     };
   }
 
+  const roomConflicts = await checkRoomConflicts(room.id, input.date, input.startTime, input.endTime);
+  if (roomConflicts.length === 0) {
+    return {
+      success: false,
+      errors: [{ field: 'timeRange', message: '该时段房间空闲，请直接创建预约而非候补' }]
+    };
+  }
+
   const waitlist = await prisma.waitlist.create({
     data: {
       bookerName: input.bookerName,
@@ -194,6 +202,11 @@ export async function processWaitlistForSlot(roomId: string, date: string, start
       continue;
     }
 
+    const userConflicts = await checkUserConflicts(wl.bookerName, wl.date, wl.startTime, wl.endTime);
+    if (userConflicts.length > 0) {
+      continue;
+    }
+
     const booking = await prisma.booking.create({
       data: {
         bookerName: wl.bookerName,
@@ -257,6 +270,11 @@ export async function processWaitlistForRoom(roomId: string, date: string, sourc
   for (const wl of pendingWaitlists) {
     const conflicts = await checkRoomConflicts(wl.roomId, wl.date, wl.startTime, wl.endTime);
     if (conflicts.length > 0) {
+      continue;
+    }
+
+    const userConflicts = await checkUserConflicts(wl.bookerName, wl.date, wl.startTime, wl.endTime);
+    if (userConflicts.length > 0) {
       continue;
     }
 
