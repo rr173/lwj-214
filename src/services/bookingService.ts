@@ -6,6 +6,7 @@ import {
   ValidationError
 } from '../utils/validation';
 import { getRoomByNumber } from './roomService';
+import { processWaitlistForSlot, processWaitlistForRoom } from './waitlistService';
 import type { MeetingRoom, Booking } from '@prisma/client';
 
 export interface CreateBookingInput {
@@ -45,6 +46,7 @@ export async function checkRoomConflicts(
       roomId,
       date,
       isCancelled: false,
+      isReleased: false,
       ...(excludeBookingId ? { id: { not: excludeBookingId } } : {})
     }
   });
@@ -77,6 +79,7 @@ export async function checkUserConflicts(
       bookerName,
       date,
       isCancelled: false,
+      isReleased: false,
       ...(excludeBookingId ? { id: { not: excludeBookingId } } : {})
     }
   });
@@ -228,7 +231,24 @@ export async function cancelBooking(id: string, cancelReason: string) {
     }
   });
 
-  return { success: true, data: updated };
+  await prisma.bookingLog.create({
+    data: {
+      date: booking.date,
+      type: 'booking_cancelled',
+      bookingId: booking.id,
+      description: `预约取消: ${booking.bookerName} 的预约(${booking.roomNumber} ${booking.date} ${booking.startTime}-${booking.endTime})被取消，原因: ${cancelReason}`
+    }
+  });
+
+  const conversions = await processWaitlistForSlot(
+    booking.roomId,
+    booking.date,
+    booking.startTime,
+    booking.endTime,
+    '预约取消'
+  );
+
+  return { success: true, data: updated, waitlistConversions: conversions };
 }
 
 export async function updateBooking(id: string, input: UpdateBookingInput) {
@@ -295,7 +315,9 @@ export async function updateBooking(id: string, input: UpdateBookingInput) {
     return { success: false, errors: [attendeeErr] };
   }
 
-  if (input.roomNumber || input.date || input.startTime || input.endTime) {
+  const timeOrRoomChanged = !!(input.roomNumber || input.date || input.startTime || input.endTime);
+
+  if (timeOrRoomChanged) {
     const roomConflicts = await checkRoomConflicts(room.id, date, startTime, endTime, id);
     if (roomConflicts.length > 0) {
       const conflictDescs = roomConflicts.map(c =>
@@ -335,6 +357,32 @@ export async function updateBooking(id: string, input: UpdateBookingInput) {
     data: updateData,
     include: { room: true }
   });
+
+  if (timeOrRoomChanged) {
+    const oldRoomId = existingBooking.roomId;
+    const oldDate = existingBooking.date;
+    const oldStartTime = existingBooking.startTime;
+    const oldEndTime = existingBooking.endTime;
+
+    const roomChanged = input.roomNumber && input.roomNumber !== existingBooking.roomNumber;
+    const dateChanged = input.date && input.date !== existingBooking.date;
+    const timeChanged = (input.startTime && input.startTime !== existingBooking.startTime) ||
+                        (input.endTime && input.endTime !== existingBooking.endTime);
+
+    if (roomChanged || dateChanged || timeChanged) {
+      await processWaitlistForSlot(
+        oldRoomId,
+        oldDate,
+        oldStartTime,
+        oldEndTime,
+        '预约改期'
+      );
+
+      if (roomChanged) {
+        await processWaitlistForRoom(oldRoomId, oldDate, '房间调整');
+      }
+    }
+  }
 
   return { success: true, data: updated };
 }

@@ -4,6 +4,8 @@ import bookingsRouter from './routes/bookings';
 import recommendationRouter from './routes/recommendation';
 import conflictsRouter from './routes/conflicts';
 import statisticsRouter from './routes/statistics';
+import waitlistRouter from './routes/waitlist';
+import { startScheduler, stopScheduler } from './services/schedulerService';
 import prisma from './prisma';
 
 const app = express();
@@ -18,7 +20,7 @@ app.get('/health', (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     name: '会议室预约与冲突调度服务',
-    version: '1.0.0',
+    version: '2.0.0',
     endpoints: {
       rooms: {
         'POST /api/rooms': '注册会议室',
@@ -34,7 +36,15 @@ app.get('/', (req, res) => {
         'GET /api/bookings/room/:roomNumber/:date': '查询某房间某天的预约',
         'GET /api/bookings/range/:startDate/:endDate': '查询日期范围内的预约',
         'PUT /api/bookings/:id': '修改预约',
-        'POST /api/bookings/:id/cancel': '取消预约'
+        'POST /api/bookings/:id/cancel': '取消预约',
+        'POST /api/bookings/:id/checkin': '签到'
+      },
+      waitlist: {
+        'POST /api/waitlist': '创建候补',
+        'GET /api/waitlist': '候补列表（支持筛选）',
+        'GET /api/waitlist/:id': '候补详情',
+        'POST /api/waitlist/:id/cancel': '取消候补',
+        'GET /api/waitlist/logs/:date': '某天自动释放与补位记录'
       },
       recommendation: {
         'POST /api/recommendation': '智能推荐空闲会议室'
@@ -43,7 +53,7 @@ app.get('/', (req, res) => {
         'POST /api/conflicts/batch': '批量冲突检测'
       },
       statistics: {
-        'GET /api/statistics/weekly?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD': '周报统计'
+        'GET /api/statistics/weekly?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD': '周报统计（含未签到释放、候补转正等指标）'
       }
     }
   });
@@ -54,6 +64,7 @@ app.use('/api/bookings', bookingsRouter);
 app.use('/api/recommendation', recommendationRouter);
 app.use('/api/conflicts', conflictsRouter);
 app.use('/api/statistics', statisticsRouter);
+app.use('/api/waitlist', waitlistRouter);
 
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error(err.stack);
@@ -64,6 +75,8 @@ async function startServer() {
   try {
     await prisma.$connect();
     console.log('数据库连接成功');
+
+    startScheduler();
 
     app.listen(PORT, () => {
       console.log(`服务器运行在 http://localhost:${PORT}`);
@@ -77,6 +90,7 @@ async function startServer() {
 startServer();
 
 process.on('SIGINT', async () => {
+  stopScheduler();
   await prisma.$disconnect();
   process.exit(0);
 });

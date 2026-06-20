@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { format, addDays } from 'date-fns';
+import { format, addDays, subMinutes, addMinutes } from 'date-fns';
 
 const prisma = new PrismaClient();
 
@@ -24,6 +24,31 @@ interface SeedBooking {
   topic: string;
   isCancelled?: boolean;
   cancelReason?: string;
+  isReleased?: boolean;
+  checkInTime?: Date | null;
+}
+
+interface SeedWaitlist {
+  bookerName: string;
+  roomNumber: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  attendeeCount: number;
+  requiredFacilities: string[];
+  topic: string;
+  status: string;
+  convertedAt?: Date | null;
+  convertedSource?: string | null;
+  convertedBookingId?: string | null;
+}
+
+interface SeedBookingLog {
+  date: string;
+  type: string;
+  description: string;
+  bookingId?: string | null;
+  waitlistId?: string | null;
 }
 
 const rooms: SeedRoom[] = [
@@ -49,7 +74,73 @@ const bookings: SeedBooking[] = [
   { bookerName: '李四', roomNumber: 'M201', date: tomorrow, startTime: '10:00', endTime: '11:30', attendeeCount: 6, topic: '技术方案评审' },
   { bookerName: '王五', roomNumber: 'M202', date: tomorrow, startTime: '14:00', endTime: '16:00', attendeeCount: 8, topic: '季度总结' },
   { bookerName: '赵六', roomNumber: 'L301', date: tomorrow, startTime: '09:00', endTime: '12:00', attendeeCount: 18, topic: '战略规划会议' },
-  { bookerName: '孙七', roomNumber: 'S102', date: tomorrow, startTime: '15:00', endTime: '16:00', attendeeCount: 2, topic: '面试', isCancelled: true, cancelReason: '候选人改期' }
+  { bookerName: '孙七', roomNumber: 'S102', date: tomorrow, startTime: '15:00', endTime: '16:00', attendeeCount: 2, topic: '面试', isCancelled: true, cancelReason: '候选人改期' },
+];
+
+const demoBookings: SeedBooking[] = [
+  {
+    bookerName: '候补演示-张伟',
+    roomNumber: 'S102',
+    date: tomorrow,
+    startTime: '09:00',
+    endTime: '10:00',
+    attendeeCount: 3,
+    topic: '候补转正演示-原预约',
+    isCancelled: true,
+    cancelReason: '临时出差'
+  },
+  {
+    bookerName: '未签到演示-刘芳',
+    roomNumber: 'S101',
+    date: today,
+    startTime: format(addMinutes(new Date(), -30), 'HH:mm').split('.')[0].length >= 5 ? '08:00' : '08:00',
+    endTime: '09:00',
+    attendeeCount: 2,
+    topic: '未签到释放演示-此预约已超时未签到',
+    isReleased: true,
+    isCancelled: true,
+    checkInTime: null
+  },
+];
+
+const demoWaitlists: SeedWaitlist[] = [
+  {
+    bookerName: '候补人-陈静',
+    roomNumber: 'S102',
+    date: tomorrow,
+    startTime: '09:00',
+    endTime: '10:00',
+    attendeeCount: 3,
+    requiredFacilities: ['白板'],
+    topic: '候补转正演示-候补人',
+    status: 'converted',
+    convertedAt: new Date(),
+    convertedSource: '预约取消'
+  },
+  {
+    bookerName: '候补人-何强',
+    roomNumber: 'S101',
+    date: today,
+    startTime: '08:00',
+    endTime: '09:00',
+    attendeeCount: 2,
+    requiredFacilities: [],
+    topic: '未签到释放后补位演示-候补人',
+    status: 'converted',
+    convertedAt: new Date(),
+    convertedSource: '未签到释放'
+  },
+  {
+    bookerName: '候补人-许洋',
+    roomNumber: 'M201',
+    date: tomorrow,
+    startTime: '16:00',
+    endTime: '17:00',
+    attendeeCount: 5,
+    requiredFacilities: ['投影仪'],
+    topic: '待补位-项目复盘',
+    status: 'pending'
+  },
 ];
 
 async function ensureFacility(name: string): Promise<string> {
@@ -92,7 +183,11 @@ async function main() {
   const allRooms = await prisma.meetingRoom.findMany();
   const roomMap = new Map(allRooms.map(r => [r.roomNumber, r.id]));
 
-  for (const booking of bookings) {
+  const allBookings = [...bookings, ...demoBookings];
+
+  const createdBookingIds: { bookingId: string; roomNumber: string; date: string; startTime: string; endTime: string; bookerName: string; topic: string; isReleased: boolean }[] = [];
+
+  for (const booking of allBookings) {
     const roomId = roomMap.get(booking.roomNumber);
     if (!roomId) {
       console.log(`跳过预约，会议室不存在: ${booking.roomNumber}`);
@@ -124,22 +219,218 @@ async function main() {
       if (booking.isCancelled) {
         data.isCancelled = true;
         data.cancelledAt = new Date();
-        data.cancelReason = booking.cancelReason;
+        data.cancelReason = booking.cancelReason || '未指定';
       }
 
-      await prisma.booking.create({ data });
-      console.log(`创建预约: ${booking.date} ${booking.startTime}-${booking.endTime} ${booking.roomNumber} ${booking.topic}${booking.isCancelled ? ' (已取消)' : ''}`);
+      if (booking.isReleased) {
+        data.isReleased = true;
+        data.releasedAt = new Date();
+        if (!data.cancelReason) {
+          data.cancelReason = '未签到自动释放';
+        }
+      }
+
+      const created = await prisma.booking.create({ data });
+      createdBookingIds.push({
+        bookingId: created.id,
+        roomNumber: booking.roomNumber,
+        date: booking.date,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        bookerName: booking.bookerName,
+        topic: booking.topic,
+        isReleased: booking.isReleased || false
+      });
+      console.log(`创建预约: ${booking.date} ${booking.startTime}-${booking.endTime} ${booking.roomNumber} ${booking.topic}${booking.isCancelled ? ' (已取消)' : ''}${booking.isReleased ? ' (已释放)' : ''}`);
     } else {
+      createdBookingIds.push({
+        bookingId: existing.id,
+        roomNumber: booking.roomNumber,
+        date: booking.date,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        bookerName: booking.bookerName,
+        topic: booking.topic,
+        isReleased: booking.isReleased || false
+      });
       console.log(`预约已存在: ${booking.date} ${booking.startTime}-${booking.endTime} ${booking.roomNumber}`);
+    }
+  }
+
+  for (const wl of demoWaitlists) {
+    const roomId = roomMap.get(wl.roomNumber);
+    if (!roomId) {
+      console.log(`跳过候补，会议室不存在: ${wl.roomNumber}`);
+      continue;
+    }
+
+    const existing = await prisma.waitlist.findFirst({
+      where: {
+        roomNumber: wl.roomNumber,
+        date: wl.date,
+        startTime: wl.startTime,
+        endTime: wl.endTime,
+        bookerName: wl.bookerName,
+        topic: wl.topic
+      }
+    });
+
+    if (!existing) {
+      let convertedBookingId: string | null = null;
+
+      if (wl.status === 'converted') {
+        const matchingBooking = await prisma.booking.findFirst({
+          where: {
+            roomNumber: wl.roomNumber,
+            date: wl.date,
+            startTime: wl.startTime,
+            endTime: wl.endTime,
+            bookerName: wl.bookerName,
+            convertedFromWaitlistId: { not: null }
+          }
+        });
+
+        if (!matchingBooking) {
+          const convertedBooking = await prisma.booking.create({
+            data: {
+              bookerName: wl.bookerName,
+              roomId,
+              roomNumber: wl.roomNumber,
+              date: wl.date,
+              startTime: wl.startTime,
+              endTime: wl.endTime,
+              attendeeCount: wl.attendeeCount,
+              topic: wl.topic,
+              convertedFromWaitlistAt: wl.convertedAt || new Date()
+            }
+          });
+          convertedBookingId = convertedBooking.id;
+          console.log(`创建候补转正预约: ${wl.date} ${wl.startTime}-${wl.endTime} ${wl.roomNumber} ${wl.topic}`);
+        } else {
+          convertedBookingId = matchingBooking.id;
+        }
+      }
+
+      const waitlist = await prisma.waitlist.create({
+        data: {
+          bookerName: wl.bookerName,
+          roomId,
+          roomNumber: wl.roomNumber,
+          date: wl.date,
+          startTime: wl.startTime,
+          endTime: wl.endTime,
+          attendeeCount: wl.attendeeCount,
+          requiredFacilities: JSON.stringify(wl.requiredFacilities),
+          topic: wl.topic,
+          status: wl.status,
+          convertedAt: wl.convertedAt,
+          convertedSource: wl.convertedSource,
+          convertedBookingId
+        }
+      });
+
+      if (wl.status === 'converted' && convertedBookingId) {
+        await prisma.booking.update({
+          where: { id: convertedBookingId },
+          data: { convertedFromWaitlistId: waitlist.id }
+        });
+      }
+
+      console.log(`创建候补: ${wl.date} ${wl.startTime}-${wl.endTime} ${wl.roomNumber} ${wl.bookerName} [${wl.status}]`);
+    } else {
+      console.log(`候补已存在: ${wl.date} ${wl.startTime}-${wl.endTime} ${wl.roomNumber} ${wl.bookerName}`);
+    }
+  }
+
+  const noShowBooking = createdBookingIds.find(b => b.isReleased && b.topic.includes('未签到释放'));
+  if (noShowBooking) {
+    const existingLog = await prisma.bookingLog.findFirst({
+      where: { bookingId: noShowBooking.bookingId, type: 'no_show_release' }
+    });
+    if (!existingLog) {
+      await prisma.bookingLog.create({
+        data: {
+          date: noShowBooking.date,
+          type: 'no_show_release',
+          bookingId: noShowBooking.bookingId,
+          description: `未签到释放: ${noShowBooking.bookerName} 的预约(${noShowBooking.roomNumber} ${noShowBooking.date} ${noShowBooking.startTime}-${noShowBooking.endTime})因超时未签到自动释放`
+        }
+      });
+      console.log(`创建日志: 未签到释放 - ${noShowBooking.topic}`);
+    }
+  }
+
+  const cancelBooking = createdBookingIds.find(b => b.topic.includes('候补转正演示-原预约'));
+  if (cancelBooking) {
+    const existingLog = await prisma.bookingLog.findFirst({
+      where: { bookingId: cancelBooking.bookingId, type: 'booking_cancelled' }
+    });
+    if (!existingLog) {
+      await prisma.bookingLog.create({
+        data: {
+          date: cancelBooking.date,
+          type: 'booking_cancelled',
+          bookingId: cancelBooking.bookingId,
+          description: `预约取消: ${cancelBooking.bookerName} 的预约(${cancelBooking.roomNumber} ${cancelBooking.date} ${cancelBooking.startTime}-${cancelBooking.endTime})被取消，原因: 临时出差`
+        }
+      });
+      console.log(`创建日志: 预约取消 - ${cancelBooking.topic}`);
+    }
+  }
+
+  const waitlistConvertedLog = await prisma.bookingLog.findFirst({
+    where: { type: 'waitlist_converted' }
+  });
+  if (!waitlistConvertedLog) {
+    const convertedWl = await prisma.waitlist.findFirst({
+      where: { status: 'converted', convertedSource: '预约取消' }
+    });
+    const convertedBooking = await prisma.booking.findFirst({
+      where: { bookerName: '候补人-陈静', date: tomorrow, startTime: '09:00', endTime: '10:00' }
+    });
+    if (convertedWl && convertedBooking) {
+      await prisma.bookingLog.create({
+        data: {
+          date: tomorrow,
+          type: 'waitlist_converted',
+          bookingId: convertedBooking.id,
+          waitlistId: convertedWl.id,
+          description: `候补转正: 候补人-陈静 的候补(S102 ${tomorrow} 09:00-10:00)因[预约取消]转为正式预约`
+        }
+      });
+      console.log('创建日志: 候补转正 - 候补人-陈静');
+    }
+
+    const noShowWl = await prisma.waitlist.findFirst({
+      where: { status: 'converted', convertedSource: '未签到释放' }
+    });
+    const noShowConvertedBooking = await prisma.booking.findFirst({
+      where: { bookerName: '候补人-何强' }
+    });
+    if (noShowWl && noShowConvertedBooking) {
+      await prisma.bookingLog.create({
+        data: {
+          date: today,
+          type: 'waitlist_converted',
+          bookingId: noShowConvertedBooking.id,
+          waitlistId: noShowWl.id,
+          description: `候补转正: 候补人-何强 的候补(S101 ${today} 08:00-09:00)因[未签到释放]转为正式预约`
+        }
+      });
+      console.log('创建日志: 候补转正 - 候补人-何强');
     }
   }
 
   console.log('\n预置数据完成！');
   console.log(`会议室数量: ${rooms.length}`);
-  console.log(`预约记录数量: ${bookings.length}`);
-  console.log(`今日(${today})预约: ${bookings.filter(b => b.date === today).length}条`);
-  console.log(`明日(${tomorrow})预约: ${bookings.filter(b => b.date === tomorrow).length}条`);
-  console.log(`已取消预约: ${bookings.filter(b => b.isCancelled).length}条`);
+  console.log(`预约记录数量: ${allBookings.length}`);
+  console.log(`候补记录数量: ${demoWaitlists.length}`);
+  console.log(`今日(${today})预约: ${allBookings.filter(b => b.date === today).length}条`);
+  console.log(`明日(${tomorrow})预约: ${allBookings.filter(b => b.date === tomorrow).length}条`);
+  console.log(`已取消预约: ${allBookings.filter(b => b.isCancelled).length}条`);
+  console.log(`已释放预约(未签到): ${allBookings.filter(b => b.isReleased).length}条`);
+  console.log(`候补转正: ${demoWaitlists.filter(w => w.status === 'converted').length}条`);
+  console.log(`待补位: ${demoWaitlists.filter(w => w.status === 'pending').length}条`);
 }
 
 main()

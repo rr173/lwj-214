@@ -19,6 +19,7 @@ model MeetingRoom {
 
   facilities   RoomFacility[]
   bookings     Booking[]
+  waitlists    Waitlist[]
 }
 
 model Facility {
@@ -37,20 +38,61 @@ model RoomFacility {
 }
 
 model Booking {
-  id              String    @id @default(uuid())
-  bookerName      String
-  roomId          String
-  roomNumber      String
-  date            String
-  startTime       String
-  endTime         String
-  attendeeCount   Int
-  topic           String
-  isCancelled     Boolean   @default(false)
-  cancelledAt     DateTime?
-  cancelReason    String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                       String    @id @default(uuid())
+  bookerName               String
+  roomId                   String
+  roomNumber               String
+  date                     String
+  startTime                String
+  endTime                  String
+  attendeeCount            Int
+  topic                    String
+  isCancelled              Boolean   @default(false)
+  cancelledAt              DateTime?
+  cancelReason             String?
+  checkInTime              DateTime?
+  isReleased               Boolean   @default(false)
+  releasedAt               DateTime?
+  convertedFromWaitlistId  String?
+  convertedFromWaitlistAt  DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
-  room            MeetingRoom @relation(fields: [roomId], references: [id])
+  room                     MeetingRoom @relation(fields: [roomId], references: [id])
+  bookingLogs              BookingLog[]
+}
+
+model Waitlist {
+  id                   String    @id @default(uuid())
+  bookerName           String
+  roomId               String
+  roomNumber           String
+  date                 String
+  startTime            String
+  endTime              String
+  attendeeCount        Int
+  requiredFacilities   String
+  topic                String
+  status               String    @default("pending")
+  convertedAt          DateTime?
+  convertedSource      String?
+  convertedBookingId   String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  room                 MeetingRoom @relation(fields: [roomId], references: [id])
+  logs                 BookingLog[]
+}
+
+model BookingLog {
+  id            String    @id @default(uuid())
+  date          String
+  type          String
+  bookingId     String?
+  waitlistId    String?
+  description   String
+  createdAt     DateTime  @default(now())
+
+  booking       Booking?  @relation(fields: [bookingId], references: [id])
+  waitlist      Waitlist? @relation(fields: [waitlistId], references: [id])
 }

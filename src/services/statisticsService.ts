@@ -1,5 +1,5 @@
 import prisma from '../prisma';
-import { parse, differenceInDays, addDays, format, isAfter, isBefore } from 'date-fns';
+import { parse, differenceInDays, format, isAfter, isBefore } from 'date-fns';
 import { timeToMinutes, WORK_START, WORK_END } from '../utils/time';
 import { isValidDateFormat } from '../utils/time';
 import { queryRooms } from './roomService';
@@ -28,6 +28,10 @@ export interface RoomStatistics {
   totalBookings: number;
   cancelledBookings: number;
   cancellationRate: number;
+  noShowReleasedBookings: number;
+  waitlistConvertedBookings: number;
+  effectiveBookings: number;
+  effectiveCancellationRate: number;
 }
 
 export async function getWeeklyStatistics(input: StatisticsInput) {
@@ -85,8 +89,10 @@ export async function getWeeklyStatistics(input: StatisticsInput) {
 
   for (const room of rooms) {
     const roomBookings = allBookings.filter(b => b.roomId === room.id);
+    const cancelledBookings = roomBookings.filter(b => b.isCancelled && !b.isReleased);
+    const noShowReleasedBookings = roomBookings.filter(b => b.isReleased);
+    const waitlistConvertedBookings = roomBookings.filter(b => b.convertedFromWaitlistId !== null && !b.isCancelled);
     const activeBookings = roomBookings.filter(b => !b.isCancelled);
-    const cancelledBookings = roomBookings.filter(b => b.isCancelled);
 
     let totalBookedMinutes = 0;
     const hourCounts = new Map<string, number>();
@@ -115,6 +121,10 @@ export async function getWeeklyStatistics(input: StatisticsInput) {
 
     const totalBookings = roomBookings.length;
     const cancellationRate = totalBookings > 0 ? (cancelledBookings.length / totalBookings) * 100 : 0;
+    const effectiveBookings = activeBookings.length;
+    const effectiveCancellationRate = totalBookings > 0
+      ? ((cancelledBookings.length + noShowReleasedBookings.length) / totalBookings) * 100
+      : 0;
 
     const sortedHours = Array.from(hourCounts.entries())
       .sort((a, b) => b[1] - a[1])
@@ -133,9 +143,18 @@ export async function getWeeklyStatistics(input: StatisticsInput) {
       averageAttendees: Math.round(averageAttendees * 100) / 100,
       totalBookings,
       cancelledBookings: cancelledBookings.length,
-      cancellationRate: Math.round(cancellationRate * 100) / 100
+      cancellationRate: Math.round(cancellationRate * 100) / 100,
+      noShowReleasedBookings: noShowReleasedBookings.length,
+      waitlistConvertedBookings: waitlistConvertedBookings.length,
+      effectiveBookings,
+      effectiveCancellationRate: Math.round(effectiveCancellationRate * 100) / 100
     });
   }
+
+  const allCancelled = allBookings.filter(b => b.isCancelled && !b.isReleased);
+  const allNoShowReleased = allBookings.filter(b => b.isReleased);
+  const allWaitlistConverted = allBookings.filter(b => b.convertedFromWaitlistId !== null && !b.isCancelled);
+  const allActive = allBookings.filter(b => !b.isCancelled);
 
   const overallStats = {
     dateRange: {
@@ -145,10 +164,15 @@ export async function getWeeklyStatistics(input: StatisticsInput) {
     },
     totalRooms: rooms.length,
     totalBookings: allBookings.length,
-    totalActiveBookings: allBookings.filter(b => !b.isCancelled).length,
-    totalCancelledBookings: allBookings.filter(b => b.isCancelled).length,
+    totalActiveBookings: allActive.length,
+    totalCancelledBookings: allCancelled.length,
+    totalNoShowReleasedBookings: allNoShowReleased.length,
+    totalWaitlistConvertedBookings: allWaitlistConverted.length,
     overallCancellationRate: allBookings.length > 0
-      ? Math.round((allBookings.filter(b => b.isCancelled).length / allBookings.length) * 10000) / 100
+      ? Math.round((allCancelled.length / allBookings.length) * 10000) / 100
+      : 0,
+    overallEffectiveCancellationRate: allBookings.length > 0
+      ? Math.round(((allCancelled.length + allNoShowReleased.length) / allBookings.length) * 10000) / 100
       : 0,
     overallUsageRate: roomStats.length > 0
       ? Math.round((roomStats.reduce((sum, r) => sum + r.usageRate, 0) / roomStats.length) * 100) / 100
