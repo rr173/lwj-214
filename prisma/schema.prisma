@@ -24,6 +24,18 @@ model MeetingRoom {
   facilities     RoomFacility[]
   bookings       Booking[]
   waitlists      Waitlist[]
+  billingRecords BillingRecord[]
+}
+
+model Department {
+  id            String              @id @default(uuid())
+  name          String              @unique
+  monthlyBudget Float
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  bookings      Booking[]
+  billingRecords BillingRecord[]
 }
 
 model Facility {
@@ -44,6 +56,7 @@ model RoomFacility {
 model Booking {
   id                       String    @id @default(uuid())
   bookerName               String
+  departmentId             String?
   roomId                   String
   roomNumber               String
   date                     String
@@ -51,6 +64,8 @@ model Booking {
   endTime                  String
   attendeeCount            Int
   topic                    String
+  totalCost                Float?
+  refundedAmount           Float?    @default(0)
   isCancelled              Boolean   @default(false)
   cancelledAt              DateTime?
   cancelReason             String?
@@ -63,8 +78,31 @@ model Booking {
   updatedAt                DateTime  @updatedAt
 
   room                     MeetingRoom @relation(fields: [roomId], references: [id])
+  department               Department? @relation(fields: [departmentId], references: [id])
   bookingLogs              BookingLog[]
   visitors                 Visitor[]
+  billingRecords           BillingRecord[]
+}
+
+model BillingRecord {
+  id             String    @id @default(uuid())
+  departmentId   String
+  bookingId      String?
+  roomId         String
+  roomNumber     String
+  date           String
+  type           String
+  amount         Float
+  peakHoursCost  Float     @default(0)
+  offPeakHoursCost Float   @default(0)
+  peakMinutes    Int       @default(0)
+  offPeakMinutes Int       @default(0)
+  description    String?
+  createdAt      DateTime  @default(now())
+
+  department     Department @relation(fields: [departmentId], references: [id])
+  booking        Booking?   @relation(fields: [bookingId], references: [id])
+  room           MeetingRoom @relation(fields: [roomId], references: [id])
 }
 
 model Waitlist {

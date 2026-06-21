@@ -6,6 +6,7 @@ import conflictsRouter from './routes/conflicts';
 import statisticsRouter from './routes/statistics';
 import waitlistRouter from './routes/waitlist';
 import visitorsRouter from './routes/visitors';
+import budgetRouter from './routes/budget';
 import { startScheduler, stopScheduler } from './services/schedulerService';
 import prisma from './prisma';
 
@@ -21,7 +22,7 @@ app.get('/health', (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     name: '会议室预约与冲突调度服务',
-    version: '2.0.0',
+    version: '3.0.0',
     endpoints: {
       rooms: {
         'POST /api/rooms': '注册会议室',
@@ -32,12 +33,12 @@ app.get('/', (req, res) => {
         'PATCH /api/rooms/:id/active': '启用/停用会议室'
       },
       bookings: {
-        'POST /api/bookings': '创建预约',
+        'POST /api/bookings': '创建预约（需指定部门，自动扣费）',
         'GET /api/bookings/:id': '查询预约详情',
         'GET /api/bookings/room/:roomNumber/:date': '查询某房间某天的预约',
         'GET /api/bookings/range/:startDate/:endDate': '查询日期范围内的预约',
-        'PUT /api/bookings/:id': '修改预约',
-        'POST /api/bookings/:id/cancel': '取消预约',
+        'PUT /api/bookings/:id': '修改预约（多退少补差价）',
+        'POST /api/bookings/:id/cancel': '取消预约（按时间比例退费）',
         'POST /api/bookings/:id/checkin': '签到'
       },
       waitlist: {
@@ -63,6 +64,17 @@ app.get('/', (req, res) => {
         'GET /api/visitors/date/:date?status=pending|checked_in|invalidated': '查询某天的访客记录（支持按状态筛选）',
         'GET /api/visitors/host/:hostName': '按接待人查询访客',
         'GET /api/visitors/:id': '查询访客详情'
+      },
+      budget: {
+        'POST /api/budget/departments': '创建部门',
+        'GET /api/budget/departments': '获取所有部门',
+        'GET /api/budget/departments/:id': '获取部门详情',
+        'PUT /api/budget/departments/:id/budget': '设置部门月度预算',
+        'GET /api/budget/departments/:id/balance?month=YYYY-MM': '查询部门当月余额',
+        'GET /api/budget/departments/:id/consumptions?month=YYYY-MM': '查询部门当月消费明细',
+        'GET /api/budget/ranking/departments?month=YYYY-MM': '某月全部门费用排行',
+        'GET /api/budget/revenue/rooms?roomNumber=XXX&month=YYYY-MM': '会议室月度收入统计',
+        'POST /api/budget/calculate': '试算预约费用'
       }
     }
   });
@@ -75,6 +87,7 @@ app.use('/api/conflicts', conflictsRouter);
 app.use('/api/statistics', statisticsRouter);
 app.use('/api/waitlist', waitlistRouter);
 app.use('/api/visitors', visitorsRouter);
+app.use('/api/budget', budgetRouter);
 
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error(err.stack);

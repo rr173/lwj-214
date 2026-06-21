@@ -8,10 +8,13 @@ import {
 import { getRoomByNumber } from './roomService';
 import { processWaitlistForSlot, processWaitlistForRoom } from './waitlistService';
 import { invalidateVisitorsByBookingId } from './visitorService';
+import { calculateCost, calculateRefund, createBillingRecord, CostBreakdown } from './billingService';
+import { getDepartmentByName, hasEnoughBalance, getMonthKey } from './budgetService';
 import type { MeetingRoom, Booking } from '@prisma/client';
 
 export interface CreateBookingInput {
   bookerName: string;
+  departmentName: string;
   roomNumber: string;
   date: string;
   startTime: string;
@@ -107,6 +110,10 @@ export async function createBooking(input: CreateBookingInput) {
   const bookerNameErr = validateBookerName(input.bookerName);
   if (bookerNameErr) errors.push(bookerNameErr);
 
+  if (!input.departmentName || typeof input.departmentName !== 'string') {
+    errors.push({ field: 'departmentName', message: '所属部门不能为空' });
+  }
+
   const topicErr = validateTopic(input.topic);
   if (topicErr) errors.push(topicErr);
 
@@ -118,6 +125,14 @@ export async function createBooking(input: CreateBookingInput) {
 
   if (errors.length > 0) {
     return { success: false, errors };
+  }
+
+  const department = await getDepartmentByName(input.departmentName);
+  if (!department) {
+    return {
+      success: false,
+      errors: [{ field: 'departmentName', message: `部门 ${input.departmentName} 不存在` }]
+    };
   }
 
   const room = await getRoomByNumber(input.roomNumber);
@@ -138,6 +153,17 @@ export async function createBooking(input: CreateBookingInput) {
   const attendeeErr = validateAttendeeCount(input.attendeeCount, room.capacity);
   if (attendeeErr) {
     return { success: false, errors: [attendeeErr] };
+  }
+
+  const costBreakdown = calculateCost(input.startTime, input.endTime, room.capacity);
+
+  const monthKey = getMonthKey(input.date);
+  const enough = await hasEnoughBalance(department.id, costBreakdown.totalCost, monthKey);
+  if (!enough) {
+    return {
+      success: false,
+      errors: [{ field: 'departmentName', message: `部门月度预算不足，当月余额不足${costBreakdown.totalCost}元` }]
+    };
   }
 
   const roomConflicts = await checkRoomConflicts(room.id, input.date, input.startTime, input.endTime);
@@ -165,17 +191,35 @@ export async function createBooking(input: CreateBookingInput) {
   const booking = await prisma.booking.create({
     data: {
       bookerName: input.bookerName,
+      departmentId: department.id,
       roomId: room.id,
       roomNumber: input.roomNumber,
       date: input.date,
       startTime: input.startTime,
       endTime: input.endTime,
       attendeeCount: input.attendeeCount,
-      topic: input.topic
+      topic: input.topic,
+      totalCost: costBreakdown.totalCost,
+      refundedAmount: 0
     }
   });
 
-  return { success: true, data: booking };
+  await createBillingRecord({
+    departmentId: department.id,
+    bookingId: booking.id,
+    roomId: room.id,
+    roomNumber: input.roomNumber,
+    date: input.date,
+    type: 'charge',
+    amount: costBreakdown.totalCost,
+    peakMinutes: costBreakdown.peakMinutes,
+    offPeakMinutes: costBreakdown.offPeakMinutes,
+    peakHoursCost: costBreakdown.peakHoursCost,
+    offPeakHoursCost: costBreakdown.offPeakHoursCost,
+    description: `预约扣费: ${input.topic} (${input.startTime}-${input.endTime})`
+  });
+
+  return { success: true, data: { ...booking, costBreakdown } };
 }
 
 export async function getBookingById(id: string) {
@@ -223,21 +267,41 @@ export async function cancelBooking(id: string, cancelReason: string) {
     };
   }
 
+  const cancelTime = new Date();
+  let refundAmount = 0;
+  if (booking.totalCost && booking.departmentId) {
+    refundAmount = calculateRefund(booking.totalCost, booking.date, booking.startTime, cancelTime);
+  }
+
   const updated = await prisma.booking.update({
     where: { id },
     data: {
       isCancelled: true,
-      cancelledAt: new Date(),
-      cancelReason
+      cancelledAt: cancelTime,
+      cancelReason,
+      refundedAmount: refundAmount
     }
   });
+
+  if (refundAmount > 0 && booking.departmentId) {
+    await createBillingRecord({
+      departmentId: booking.departmentId,
+      bookingId: booking.id,
+      roomId: booking.roomId,
+      roomNumber: booking.roomNumber,
+      date: booking.date,
+      type: 'refund',
+      amount: -refundAmount,
+      description: `取消预约退费: ${booking.topic}，退费${refundAmount}元，原因: ${cancelReason}`
+    });
+  }
 
   await prisma.bookingLog.create({
     data: {
       date: booking.date,
       type: 'booking_cancelled',
       bookingId: booking.id,
-      description: `预约取消: ${booking.bookerName} 的预约(${booking.roomNumber} ${booking.date} ${booking.startTime}-${booking.endTime})被取消，原因: ${cancelReason}`
+      description: `预约取消: ${booking.bookerName} 的预约(${booking.roomNumber} ${booking.date} ${booking.startTime}-${booking.endTime})被取消，原因: ${cancelReason}，退费: ${refundAmount}元`
     }
   });
 
@@ -251,7 +315,7 @@ export async function cancelBooking(id: string, cancelReason: string) {
     '预约取消'
   );
 
-  return { success: true, data: updated, waitlistConversions: conversions, invalidatedVisitors };
+  return { success: true, data: { ...updated, refundAmount }, waitlistConversions: conversions, invalidatedVisitors };
 }
 
 export async function updateBooking(id: string, input: UpdateBookingInput) {
@@ -320,6 +384,28 @@ export async function updateBooking(id: string, input: UpdateBookingInput) {
 
   const timeOrRoomChanged = !!(input.roomNumber || input.date || input.startTime || input.endTime);
 
+  let newCostBreakdown: CostBreakdown | null = null;
+  let costDifference = 0;
+
+  if (timeOrRoomChanged && existingBooking.departmentId) {
+    newCostBreakdown = calculateCost(startTime, endTime, room.capacity);
+    const oldCost = existingBooking.totalCost || 0;
+    const refundedSoFar = existingBooking.refundedAmount || 0;
+    const netOldCost = oldCost - refundedSoFar;
+    costDifference = Math.round((newCostBreakdown.totalCost - netOldCost) * 100) / 100;
+
+    if (costDifference > 0) {
+      const monthKey = getMonthKey(date);
+      const enough = await hasEnoughBalance(existingBooking.departmentId, costDifference, monthKey);
+      if (!enough) {
+        return {
+          success: false,
+          errors: [{ field: 'timeRange', message: `修改后费用增加${costDifference}元，部门月度预算不足` }]
+        };
+      }
+    }
+  }
+
   if (timeOrRoomChanged) {
     const roomConflicts = await checkRoomConflicts(room.id, date, startTime, endTime, id);
     if (roomConflicts.length > 0) {
@@ -355,11 +441,50 @@ export async function updateBooking(id: string, input: UpdateBookingInput) {
   if (input.attendeeCount !== undefined) updateData.attendeeCount = input.attendeeCount;
   if (input.topic !== undefined) updateData.topic = input.topic;
 
+  if (newCostBreakdown) {
+    updateData.totalCost = newCostBreakdown.totalCost;
+  }
+
   const updated = await prisma.booking.update({
     where: { id },
     data: updateData,
     include: { room: true }
   });
+
+  if (timeOrRoomChanged && existingBooking.departmentId && newCostBreakdown && costDifference !== 0) {
+    if (costDifference > 0) {
+      await createBillingRecord({
+        departmentId: existingBooking.departmentId,
+        bookingId: id,
+        roomId: room.id,
+        roomNumber: room.roomNumber,
+        date: date,
+        type: 'charge_adjust',
+        amount: costDifference,
+        peakMinutes: newCostBreakdown.peakMinutes,
+        offPeakMinutes: newCostBreakdown.offPeakMinutes,
+        peakHoursCost: newCostBreakdown.peakHoursCost,
+        offPeakHoursCost: newCostBreakdown.offPeakHoursCost,
+        description: `修改预约补差价: ${updated.topic}，新增费用${costDifference}元`
+      });
+    } else {
+      const refundAmount = Math.abs(costDifference);
+      await prisma.booking.update({
+        where: { id },
+        data: { refundedAmount: (existingBooking.refundedAmount || 0) + refundAmount }
+      });
+      await createBillingRecord({
+        departmentId: existingBooking.departmentId,
+        bookingId: id,
+        roomId: room.id,
+        roomNumber: room.roomNumber,
+        date: date,
+        type: 'refund_adjust',
+        amount: -refundAmount,
+        description: `修改预约退差价: ${updated.topic}，退还${refundAmount}元`
+      });
+    }
+  }
 
   if (timeOrRoomChanged) {
     const oldRoomId = existingBooking.roomId;
@@ -387,5 +512,5 @@ export async function updateBooking(id: string, input: UpdateBookingInput) {
     }
   }
 
-  return { success: true, data: updated };
+  return { success: true, data: { ...updated, costDifference, newCostBreakdown } };
 }

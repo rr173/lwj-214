@@ -1,10 +1,36 @@
 import { PrismaClient } from '@prisma/client';
 import { format, addDays, subMinutes, addMinutes } from 'date-fns';
+import { calculateCost } from './services/billingService';
 
 const prisma = new PrismaClient();
 
 const today = format(new Date(), 'yyyy-MM-dd');
 const tomorrow = format(addDays(new Date(), 1), 'yyyy-MM-dd');
+
+const departments = [
+  { name: '技术部', monthlyBudget: 5000 },
+  { name: '产品部', monthlyBudget: 3000 },
+  { name: '行政部', monthlyBudget: 2000 }
+];
+
+const bookerToDepartment: Record<string, string> = {
+  '张三': '技术部',
+  '李四': '技术部',
+  '王五': '技术部',
+  '赵六': '技术部',
+  '孙七': '产品部',
+  '周八': '产品部',
+  '吴九': '产品部',
+  '林十二': '产品部',
+  '钱一': '行政部',
+  '钱二': '行政部',
+  '孙三': '行政部',
+  '候补演示-张伟': '技术部',
+  '未签到演示-刘芳': '产品部',
+  '候补人-陈静': '技术部',
+  '候补人-何强': '产品部',
+  '候补人-许洋': '行政部'
+};
 
 interface SeedRoom {
   roomNumber: string;
@@ -279,6 +305,19 @@ async function main() {
     console.log('设置 L301-B 为 L301 的子区');
   }
 
+  for (const dept of departments) {
+    const existing = await prisma.department.findUnique({ where: { name: dept.name } });
+    if (!existing) {
+      await prisma.department.create({ data: dept });
+      console.log(`创建部门: ${dept.name} (月预算 ${dept.monthlyBudget}元)`);
+    } else {
+      console.log(`部门已存在: ${dept.name}`);
+    }
+  }
+
+  const allDepartments = await prisma.department.findMany();
+  const deptMap = new Map(allDepartments.map(d => [d.name, d.id]));
+
   const allBookings = [...bookings, ...demoBookings];
 
   const createdBookingIds: { bookingId: string; roomNumber: string; date: string; startTime: string; endTime: string; bookerName: string; topic: string; isReleased: boolean }[] = [];
@@ -301,15 +340,25 @@ async function main() {
     });
 
     if (!existing) {
+      const deptName = bookerToDepartment[booking.bookerName] || '技术部';
+      const departmentId = deptMap.get(deptName);
+      const room = allRooms.find(r => r.id === roomId);
+      const costBreakdown = room
+        ? calculateCost(booking.startTime, booking.endTime, room.capacity)
+        : { peakMinutes: 0, offPeakMinutes: 0, peakHoursCost: 0, offPeakHoursCost: 0, totalCost: 0, isLargeRoom: false };
+
       const data: any = {
         bookerName: booking.bookerName,
+        departmentId,
         roomId,
         roomNumber: booking.roomNumber,
         date: booking.date,
         startTime: booking.startTime,
         endTime: booking.endTime,
         attendeeCount: booking.attendeeCount,
-        topic: booking.topic
+        topic: booking.topic,
+        totalCost: costBreakdown.totalCost,
+        refundedAmount: 0
       };
 
       if (booking.isCancelled) {
@@ -327,6 +376,26 @@ async function main() {
       }
 
       const created = await prisma.booking.create({ data });
+
+      if (departmentId && !booking.isCancelled && !booking.isReleased && costBreakdown.totalCost > 0) {
+        await prisma.billingRecord.create({
+          data: {
+            departmentId,
+            bookingId: created.id,
+            roomId,
+            roomNumber: booking.roomNumber,
+            date: booking.date,
+            type: 'charge',
+            amount: costBreakdown.totalCost,
+            peakMinutes: costBreakdown.peakMinutes,
+            offPeakMinutes: costBreakdown.offPeakMinutes,
+            peakHoursCost: costBreakdown.peakHoursCost,
+            offPeakHoursCost: costBreakdown.offPeakHoursCost,
+            description: `预置预约扣费: ${booking.topic} (${booking.startTime}-${booking.endTime})`
+          }
+        });
+      }
+
       createdBookingIds.push({
         bookingId: created.id,
         roomNumber: booking.roomNumber,
@@ -337,7 +406,7 @@ async function main() {
         topic: booking.topic,
         isReleased: booking.isReleased || false
       });
-      console.log(`创建预约: ${booking.date} ${booking.startTime}-${booking.endTime} ${booking.roomNumber} ${booking.topic}${booking.isCancelled ? ' (已取消)' : ''}${booking.isReleased ? ' (已释放)' : ''}`);
+      console.log(`创建预约: ${booking.date} ${booking.startTime}-${booking.endTime} ${booking.roomNumber} ${booking.topic} [${deptName}, ${costBreakdown.totalCost}元]${booking.isCancelled ? ' (已取消)' : ''}${booking.isReleased ? ' (已释放)' : ''}`);
     } else {
       createdBookingIds.push({
         bookingId: existing.id,
@@ -387,9 +456,17 @@ async function main() {
         });
 
         if (!matchingBooking) {
+          const wlDeptName = bookerToDepartment[wl.bookerName] || '技术部';
+          const wlDeptId = deptMap.get(wlDeptName);
+          const wlRoom = allRooms.find(r => r.id === roomId);
+          const wlCost = wlRoom
+            ? calculateCost(wl.startTime, wl.endTime, wlRoom.capacity)
+            : { peakMinutes: 0, offPeakMinutes: 0, peakHoursCost: 0, offPeakHoursCost: 0, totalCost: 0, isLargeRoom: false };
+
           const convertedBooking = await prisma.booking.create({
             data: {
               bookerName: wl.bookerName,
+              departmentId: wlDeptId,
               roomId,
               roomNumber: wl.roomNumber,
               date: wl.date,
@@ -397,11 +474,33 @@ async function main() {
               endTime: wl.endTime,
               attendeeCount: wl.attendeeCount,
               topic: wl.topic,
+              totalCost: wlCost.totalCost,
+              refundedAmount: 0,
               convertedFromWaitlistAt: wl.convertedAt || new Date()
             }
           });
           convertedBookingId = convertedBooking.id;
-          console.log(`创建候补转正预约: ${wl.date} ${wl.startTime}-${wl.endTime} ${wl.roomNumber} ${wl.topic}`);
+
+          if (wlDeptId && wlCost.totalCost > 0) {
+            await prisma.billingRecord.create({
+              data: {
+                departmentId: wlDeptId,
+                bookingId: convertedBooking.id,
+                roomId,
+                roomNumber: wl.roomNumber,
+                date: wl.date,
+                type: 'charge',
+                amount: wlCost.totalCost,
+                peakMinutes: wlCost.peakMinutes,
+                offPeakMinutes: wlCost.offPeakMinutes,
+                peakHoursCost: wlCost.peakHoursCost,
+                offPeakHoursCost: wlCost.offPeakHoursCost,
+                description: `候补转正扣费: ${wl.topic}`
+              }
+            });
+          }
+
+          console.log(`创建候补转正预约: ${wl.date} ${wl.startTime}-${wl.endTime} ${wl.roomNumber} ${wl.topic} [${wlDeptName}, ${wlCost.totalCost}元]`);
         } else {
           convertedBookingId = matchingBooking.id;
         }
