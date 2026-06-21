@@ -805,11 +805,153 @@ async function main() {
     }
   }
 
+  const maintenancePersons = [
+    { name: '王师傅', employeeId: 'MT001', skills: ['投影仪', '白板', '视频会议系统'] },
+    { name: '李工程师', employeeId: 'MT002', skills: ['电话会议', '空调系统', '灯光控制'] },
+    { name: '张技术员', employeeId: 'MT003', skills: ['投影仪', '白板', '视频会议系统', '电话会议', '空调系统', '灯光控制'] }
+  ];
+
+  const createdPersons: any[] = [];
+  for (const mp of maintenancePersons) {
+    const existing = await prisma.maintenancePerson.findUnique({ where: { employeeId: mp.employeeId } });
+    if (!existing) {
+      const created = await prisma.maintenancePerson.create({
+        data: { ...mp, skills: JSON.stringify(mp.skills) }
+      });
+      createdPersons.push({ ...created, skills: mp.skills });
+      console.log(`创建维修人员: ${mp.name} (工号: ${mp.employeeId}, 技能: ${mp.skills.join(', ')})`);
+    } else {
+      createdPersons.push({ ...existing, skills: JSON.parse(existing.skills) });
+      console.log(`维修人员已存在: ${mp.name}`);
+    }
+  }
+
+  const wangShifu = createdPersons.find(p => p.employeeId === 'MT001');
+  const liEngineer = createdPersons.find(p => p.employeeId === 'MT002');
+  const zhangTech = createdPersons.find(p => p.employeeId === 'MT003');
+
+  if (wangShifu) {
+    const existingSchedule = await prisma.maintenanceSchedule.findMany({
+      where: { personId: wangShifu.id, date: today }
+    });
+    if (existingSchedule.length === 0) {
+      await prisma.maintenanceSchedule.createMany({
+        data: [
+          { personId: wangShifu.id, date: today, startTime: '09:00', endTime: '12:00' },
+          { personId: wangShifu.id, date: today, startTime: '13:00', endTime: '18:00' }
+        ]
+      });
+      console.log(`设置王师傅今日排班: 09:00-12:00, 13:00-18:00`);
+    }
+
+    const tomorrowSchedule = await prisma.maintenanceSchedule.findMany({
+      where: { personId: wangShifu.id, date: tomorrow }
+    });
+    if (tomorrowSchedule.length === 0) {
+      await prisma.maintenanceSchedule.createMany({
+        data: [
+          { personId: wangShifu.id, date: tomorrow, startTime: '09:00', endTime: '12:00' },
+          { personId: wangShifu.id, date: tomorrow, startTime: '13:00', endTime: '18:00' }
+        ]
+      });
+      console.log(`设置王师傅明日排班: 09:00-12:00, 13:00-18:00`);
+    }
+  }
+
+  if (liEngineer) {
+    const existingSchedule = await prisma.maintenanceSchedule.findMany({
+      where: { personId: liEngineer.id, date: today }
+    });
+    if (existingSchedule.length === 0) {
+      await prisma.maintenanceSchedule.createMany({
+        data: [
+          { personId: liEngineer.id, date: today, startTime: '09:00', endTime: '12:00' },
+          { personId: liEngineer.id, date: today, startTime: '13:00', endTime: '18:00' }
+        ]
+      });
+      console.log(`设置李工程师今日排班: 09:00-12:00, 13:00-18:00`);
+    }
+  }
+
+  if (zhangTech) {
+    const existingSchedule = await prisma.maintenanceSchedule.findMany({
+      where: { personId: zhangTech.id, date: today }
+    });
+    if (existingSchedule.length === 0) {
+      await prisma.maintenanceSchedule.createMany({
+        data: [
+          { personId: zhangTech.id, date: today, startTime: '09:00', endTime: '12:00' },
+          { personId: zhangTech.id, date: today, startTime: '13:00', endTime: '18:00' }
+        ]
+      });
+      console.log(`设置张技术员今日排班: 09:00-12:00, 13:00-18:00`);
+    }
+  }
+
+  if (wangShifu) {
+    const wangTickets = await prisma.maintenanceTicket.findMany({
+      where: { assigneeId: wangShifu.id, estimatedFixDate: today }
+    });
+
+    if (wangTickets.length === 0) {
+      const s102Room = allRooms.find(r => r.roomNumber === 'S102');
+      const m202Room = allRooms.find(r => r.roomNumber === 'M202');
+
+      if (s102Room) {
+        const ticket1 = await prisma.maintenanceTicket.create({
+          data: {
+            roomId: s102Room.id,
+            roomNumber: 'S102',
+            facilityTag: '白板',
+            description: '白板支架松动，需要加固维修',
+            reporterName: '王五',
+            urgency: 'normal',
+            status: 'in_repair',
+            assigneeId: wangShifu.id,
+            assignee: wangShifu.name,
+            estimatedFixDate: today,
+            estimatedStartTime: '09:00',
+            estimatedEndTime: '10:30',
+            submittedAt: subHours(new Date(), 3),
+            assignedAt: subHours(new Date(), 2)
+          }
+        });
+        console.log(`创建王师傅工单1: S102 白板维修 09:00-10:30 [${ticket1.id}]`);
+      }
+
+      if (m202Room) {
+        const ticket2 = await prisma.maintenanceTicket.create({
+          data: {
+            roomId: m202Room.id,
+            roomNumber: 'M202',
+            facilityTag: '投影仪',
+            description: '投影仪画面模糊，需要清洁镜头并校准',
+            reporterName: '周八',
+            urgency: 'urgent',
+            status: 'in_repair',
+            assigneeId: wangShifu.id,
+            assignee: wangShifu.name,
+            estimatedFixDate: today,
+            estimatedStartTime: '10:30',
+            estimatedEndTime: '12:00',
+            submittedAt: subHours(new Date(), 3),
+            assignedAt: subHours(new Date(), 2)
+          }
+        });
+        console.log(`创建王师傅工单2: M202 投影仪维修 10:30-12:00 [${ticket2.id}]`);
+        console.log(`>> 王师傅今日上午已被两张工单占满 (09:00-12:00)，可测试冲突检测效果 <<`);
+      }
+    } else {
+      console.log(`王师傅今日工单已存在，共 ${wangTickets.length} 张，跳过创建`);
+    }
+  }
+
   console.log('\n预置数据完成！');
   console.log(`会议室数量: ${rooms.length}`);
   console.log(`预约记录数量: ${allBookings.length}`);
   console.log(`候补记录数量: ${demoWaitlists.length}`);
   console.log(`访客记录数量: ${demoVisitors.length}`);
+  console.log(`维修人员数量: ${maintenancePersons.length}`);
   console.log(`今日(${today})预约: ${allBookings.filter(b => b.date === today).length}条`);
   console.log(`明日(${tomorrow})预约: ${allBookings.filter(b => b.date === tomorrow).length}条`);
   console.log(`已取消预约: ${allBookings.filter(b => b.isCancelled).length}条`);

@@ -165,6 +165,33 @@ model BookingLog {
   waitlist      Waitlist? @relation(fields: [waitlistId], references: [id])
 }
 
+model MaintenancePerson {
+  id           String   @id @default(uuid())
+  name         String
+  employeeId   String   @unique
+  skills       String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  schedules    MaintenanceSchedule[]
+  tickets      MaintenanceTicket[]
+}
+
+model MaintenanceSchedule {
+  id           String   @id @default(uuid())
+  personId     String
+  date         String
+  startTime    String
+  endTime      String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  person       MaintenancePerson @relation(fields: [personId], references: [id])
+
+  @@unique([personId, date, startTime, endTime])
+}
+
 model MaintenanceTicket {
   id                String    @id @default(uuid())
   roomId            String
@@ -174,8 +201,12 @@ model MaintenanceTicket {
   reporterName      String
   urgency           String
   status            String    @default("pending_assignment")
+  assigneeId        String?
   assignee          String?
   estimatedFixDate  String?
+  estimatedStartTime String?
+  estimatedEndTime   String?
+  actualDurationMinutes Int?
   submittedAt       DateTime  @default(now())
   assignedAt        DateTime?
   completedAt       DateTime?
@@ -184,4 +215,5 @@ model MaintenanceTicket {
   updatedAt         DateTime  @updatedAt
 
   room              MeetingRoom @relation(fields: [roomId], references: [id])
+  person            MaintenancePerson? @relation(fields: [assigneeId], references: [id])
 }

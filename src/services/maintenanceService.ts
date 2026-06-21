@@ -1,9 +1,11 @@
 import prisma from '../prisma';
-import { format, addDays, differenceInHours, parse, isAfter, isBefore, isEqual } from 'date-fns';
+import { format, addDays, differenceInMinutes, differenceInHours, parse, isAfter, isBefore, isEqual } from 'date-fns';
 import { getRoomByNumber, queryRooms } from './roomService';
 import { cancelBooking, checkRoomConflicts } from './bookingService';
 import { processWaitlistForSlot } from './waitlistService';
 import { validateBookerName, ValidationError } from '../utils/validation';
+import { isValidTimeFormat, timeToMinutes } from '../utils/time';
+import { findNextAvailableSlot } from './maintenancePersonService';
 
 export const TICKET_STATUS = {
   PENDING_ASSIGNMENT: 'pending_assignment',
@@ -27,8 +29,10 @@ export interface CreateTicketInput {
 
 export interface AssignTicketInput {
   ticketId: string;
-  assignee: string;
+  personId: string;
   estimatedFixDate: string;
+  estimatedStartTime: string;
+  estimatedEndTime: string;
 }
 
 export function validateUrgency(urgency: string): ValidationError | null {
@@ -345,11 +349,28 @@ export async function createTicket(input: CreateTicketInput) {
 export async function assignTicket(input: AssignTicketInput) {
   const errors: ValidationError[] = [];
 
-  const assigneeErr = validateAssignee(input.assignee);
-  if (assigneeErr) errors.push(assigneeErr);
+  if (!input.personId) {
+    errors.push({ field: 'personId', message: '维修人员ID不能为空' });
+  }
 
   const dateErr = validateEstimatedFixDate(input.estimatedFixDate);
   if (dateErr) errors.push(dateErr);
+
+  if (!input.estimatedStartTime || !isValidTimeFormat(input.estimatedStartTime)) {
+    errors.push({ field: 'estimatedStartTime', message: '预计开始时间格式不正确，应为 HH:mm' });
+  }
+
+  if (!input.estimatedEndTime || !isValidTimeFormat(input.estimatedEndTime)) {
+    errors.push({ field: 'estimatedEndTime', message: '预计结束时间格式不正确，应为 HH:mm' });
+  }
+
+  if (input.estimatedStartTime && input.estimatedEndTime) {
+    const startMin = timeToMinutes(input.estimatedStartTime);
+    const endMin = timeToMinutes(input.estimatedEndTime);
+    if (startMin >= endMin) {
+      errors.push({ field: 'estimatedEndTime', message: '预计结束时间必须晚于开始时间' });
+    }
+  }
 
   if (errors.length > 0) {
     return { success: false, errors };
@@ -370,11 +391,62 @@ export async function assignTicket(input: AssignTicketInput) {
     };
   }
 
+  const person = await prisma.maintenancePerson.findUnique({ where: { id: input.personId } });
+  if (!person) {
+    return {
+      success: false,
+      errors: [{ field: 'personId', message: '维修人员不存在' }]
+    };
+  }
+
+  const durationMinutes = timeToMinutes(input.estimatedEndTime) - timeToMinutes(input.estimatedStartTime);
+
+  const availability = await findNextAvailableSlot(
+    input.personId,
+    input.estimatedFixDate,
+    durationMinutes,
+    input.estimatedStartTime,
+    input.estimatedEndTime
+  );
+
+  if (availability.conflict) {
+    const conflictData: any = {
+      success: false,
+      conflicts: [{
+        field: 'timeSlot',
+        message: availability.conflictInfo?.outsideSchedule
+          ? '指定时段不在该维修人员当日排班范围内'
+          : '指定时段与该维修人员已有工单冲突'
+      }]
+    };
+
+    if (availability.conflictInfo?.outsideSchedule) {
+      conflictData.outsideSchedule = true;
+    }
+
+    if (availability.conflictInfo?.conflictingTickets) {
+      conflictData.conflictingTickets = availability.conflictInfo.conflictingTickets;
+    }
+
+    if (availability.nextFreeSlot) {
+      conflictData.nextAvailableSlot = availability.nextFreeSlot;
+    }
+
+    if (availability.availableSlots) {
+      conflictData.availableSlots = availability.availableSlots;
+    }
+
+    return conflictData;
+  }
+
   const updated = await prisma.maintenanceTicket.update({
     where: { id: input.ticketId },
     data: {
-      assignee: input.assignee,
+      assigneeId: input.personId,
+      assignee: person.name,
       estimatedFixDate: input.estimatedFixDate,
+      estimatedStartTime: input.estimatedStartTime,
+      estimatedEndTime: input.estimatedEndTime,
       status: TICKET_STATUS.IN_REPAIR,
       assignedAt: new Date()
     },
@@ -400,11 +472,17 @@ export async function completeTicket(ticketId: string) {
     };
   }
 
+  let actualDurationMinutes: number | null = null;
+  if (ticket.assignedAt) {
+    actualDurationMinutes = Math.max(1, differenceInMinutes(new Date(), ticket.assignedAt));
+  }
+
   const updated = await prisma.maintenanceTicket.update({
     where: { id: ticketId },
     data: {
       status: TICKET_STATUS.COMPLETED,
-      completedAt: new Date()
+      completedAt: new Date(),
+      actualDurationMinutes
     },
     include: { room: true }
   });

@@ -8,6 +8,7 @@ import waitlistRouter from './routes/waitlist';
 import visitorsRouter from './routes/visitors';
 import budgetRouter from './routes/budget';
 import maintenanceRouter from './routes/maintenance';
+import maintenancePersonRouter from './routes/maintenancePerson';
 import { startScheduler, stopScheduler } from './services/schedulerService';
 import prisma from './prisma';
 
@@ -82,10 +83,20 @@ app.get('/', (req, res) => {
         'GET /api/maintenance/tickets': '查询全部工单（支持按状态/紧急程度/房间筛选）',
         'GET /api/maintenance/tickets/:id': '查询工单详情',
         'GET /api/maintenance/tickets/room/:roomNumber': '查询某房间的历史工单',
-        'POST /api/maintenance/tickets/:id/assign': '管理员指派维修人员和预计修复时间',
+        'POST /api/maintenance/tickets/:id/assign': '指派维修人员和维修时段(需personId, estimatedFixDate, estimatedStartTime, estimatedEndTime)',
         'POST /api/maintenance/tickets/:id/complete': '完成维修',
         'POST /api/maintenance/tickets/:id/close': '关闭工单，房间恢复可用',
         'GET /api/maintenance/statistics/average-repair-time': '统计每间房间的平均维修时长'
+      },
+      maintenancePerson: {
+        'POST /api/maintenance/persons': '注册维修人员(姓名、工号、技能标签列表)',
+        'GET /api/maintenance/persons': '查询所有维修人员列表',
+        'GET /api/maintenance/persons/:id': '根据ID查询维修人员详情',
+        'GET /api/maintenance/persons/employee/:employeeId': '根据工号查询维修人员',
+        'POST /api/maintenance/persons/schedule': '设置某人某天的排班时段(personId, date, timeSlots[])',
+        'GET /api/maintenance/persons/:id/schedule/:date': '查询某人某天的排班',
+        'GET /api/maintenance/persons/:id/availability/:date': '查询某人某天的工单安排、剩余可用时长和空闲时段',
+        'GET /api/maintenance/statistics/monthly?month=YYYY-MM': '查询月度工时统计(含每人月度工时、工单完成数、平均每单耗时)'
       }
     }
   });
@@ -100,6 +111,7 @@ app.use('/api/waitlist', waitlistRouter);
 app.use('/api/visitors', visitorsRouter);
 app.use('/api/budget', budgetRouter);
 app.use('/api/maintenance', maintenanceRouter);
+app.use('/api/maintenance', maintenancePersonRouter);
 
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error(err.stack);

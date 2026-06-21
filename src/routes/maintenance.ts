@@ -54,10 +54,15 @@ router.post('/tickets/:id/assign', async (req: Request, res: Response) => {
   try {
     const result = await maintenanceService.assignTicket({
       ticketId: req.params.id,
-      assignee: req.body.assignee,
-      estimatedFixDate: req.body.estimatedFixDate
+      personId: req.body.personId,
+      estimatedFixDate: req.body.estimatedFixDate,
+      estimatedStartTime: req.body.estimatedStartTime,
+      estimatedEndTime: req.body.estimatedEndTime
     });
     if (!result.success) {
+      if (result.conflicts) {
+        return res.status(409).json(result);
+      }
       return res.status(400).json({ success: false, errors: result.errors });
     }
     res.json(result);
