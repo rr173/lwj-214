@@ -29,7 +29,9 @@ const bookerToDepartment: Record<string, string> = {
   '未签到演示-刘芳': '产品部',
   '候补人-陈静': '技术部',
   '候补人-何强': '产品部',
-  '候补人-许洋': '行政部'
+  '候补人-许洋': '行政部',
+  '重复预约演示-郑浩': '产品部',
+  '冲突预约-钱一': '技术部'
 };
 
 interface SeedRoom {
@@ -946,6 +948,152 @@ async function main() {
     }
   }
 
+  const day2 = format(addDays(new Date(), 1), 'yyyy-MM-dd');
+  const day3 = format(addDays(new Date(), 2), 'yyyy-MM-dd');
+  const day4 = format(addDays(new Date(), 3), 'yyyy-MM-dd');
+  const recurringEnd = format(addDays(new Date(), 4), 'yyyy-MM-dd');
+  const recurringDemoRoom = allRooms.find(r => r.roomNumber === 'S102');
+  const recurringDemoDept = allDepartments.find(d => d.name === '产品部');
+  const recurringBooker = '重复预约演示-郑浩';
+  const recurringTopic = '每日站会(重复预约演示)';
+  const recurringStartTime = '11:00';
+  const recurringEndTime = '11:30';
+  const recurringPattern = 'daily';
+  const recurringSeriesId = 'rec_demo_daily_standup';
+
+  if (recurringDemoRoom && recurringDemoDept) {
+    const existingRecurring = await prisma.booking.findFirst({
+      where: { recurringSeriesId }
+    });
+
+    if (!existingRecurring) {
+      const conflictDept = allDepartments.find(d => d.name === '技术部');
+      if (conflictDept) {
+        const costBreakdownConflict = calculateCost(recurringStartTime, recurringEndTime, recurringDemoRoom.capacity);
+        const conflictBooking = await prisma.booking.create({
+          data: {
+            bookerName: '冲突预约-钱一',
+            departmentId: conflictDept.id,
+            roomId: recurringDemoRoom.id,
+            roomNumber: recurringDemoRoom.roomNumber,
+            date: day3,
+            startTime: recurringStartTime,
+            endTime: recurringEndTime,
+            attendeeCount: 3,
+            topic: '临时评审会(用于重复预约冲突演示)',
+            totalCost: costBreakdownConflict.totalCost,
+            refundedAmount: 0
+          }
+        });
+        console.log(`创建冲突预约(第3天): ${day3} ${recurringStartTime}-${recurringEndTime} S102 [用于演示重复预约第3天冲突被跳过]`);
+
+        if (costBreakdownConflict.totalCost > 0) {
+          await prisma.billingRecord.create({
+            data: {
+              departmentId: conflictDept.id,
+              bookingId: conflictBooking.id,
+              roomId: recurringDemoRoom.id,
+              roomNumber: recurringDemoRoom.roomNumber,
+              date: day3,
+              type: 'charge',
+              amount: costBreakdownConflict.totalCost,
+              peakMinutes: costBreakdownConflict.peakMinutes,
+              offPeakMinutes: costBreakdownConflict.offPeakMinutes,
+              peakHoursCost: costBreakdownConflict.peakHoursCost,
+              offPeakHoursCost: costBreakdownConflict.offPeakHoursCost,
+              description: `重复预约冲突演示-扣费: ${conflictBooking.topic}`
+            }
+          });
+        }
+      }
+
+      const dates = [today, day2, day3, day4, recurringEnd];
+      const costBreakdownRecurring = calculateCost(recurringStartTime, recurringEndTime, recurringDemoRoom.capacity);
+      let recurringIndex = 0;
+      const skippedLog: { date: string; reason: string }[] = [];
+
+      for (let i = 0; i < dates.length; i++) {
+        const date = dates[i];
+
+        const hasConflict = await prisma.booking.findFirst({
+          where: {
+            roomId: recurringDemoRoom.id,
+            date,
+            isCancelled: false,
+            isReleased: false,
+            startTime: { lt: recurringEndTime },
+            endTime: { gt: recurringStartTime }
+          }
+        });
+
+        if (hasConflict) {
+          skippedLog.push({ date, reason: `与预约"${hasConflict.topic}"(${hasConflict.bookerName})时间段冲突` });
+          continue;
+        }
+
+        const created = await prisma.booking.create({
+          data: {
+            bookerName: recurringBooker,
+            departmentId: recurringDemoDept.id,
+            roomId: recurringDemoRoom.id,
+            roomNumber: recurringDemoRoom.roomNumber,
+            date,
+            startTime: recurringStartTime,
+            endTime: recurringEndTime,
+            attendeeCount: 5,
+            topic: recurringTopic,
+            totalCost: costBreakdownRecurring.totalCost,
+            refundedAmount: 0,
+            recurringSeriesId,
+            recurringPattern,
+            recurringEndDate: recurringEnd,
+            recurringIndex
+          }
+        });
+
+        if (costBreakdownRecurring.totalCost > 0) {
+          await prisma.billingRecord.create({
+            data: {
+              departmentId: recurringDemoDept.id,
+              bookingId: created.id,
+              roomId: recurringDemoRoom.id,
+              roomNumber: recurringDemoRoom.roomNumber,
+              date,
+              type: 'charge',
+              amount: costBreakdownRecurring.totalCost,
+              peakMinutes: costBreakdownRecurring.peakMinutes,
+              offPeakMinutes: costBreakdownRecurring.offPeakMinutes,
+              peakHoursCost: costBreakdownRecurring.peakHoursCost,
+              offPeakHoursCost: costBreakdownRecurring.offPeakHoursCost,
+              description: `重复预约扣费[${recurringSeriesId}][第${recurringIndex + 1}次]: ${recurringTopic}`
+            }
+          });
+        }
+
+        console.log(`创建重复预约[${recurringSeriesId}][${recurringIndex + 1}/5]: ${date} ${recurringStartTime}-${recurringEndTime} S102`);
+        recurringIndex++;
+      }
+
+      console.log(`\n========== 重复预约演示数据创建完成 ==========`);
+      console.log(`序列ID: ${recurringSeriesId}`);
+      console.log(`重复模式: ${recurringPattern}`);
+      console.log(`时间范围: ${today} ~ ${recurringEnd} (共5天)`);
+      console.log(`时段: ${recurringStartTime} - ${recurringEndTime}`);
+      console.log(`房间: S102`);
+      console.log(`预约人: ${recurringBooker}`);
+      console.log(`成功创建: ${recurringIndex} 条预约`);
+      console.log(`跳过日期:`);
+      for (const s of skippedLog) {
+        console.log(`  - ${s.date}: ${s.reason}`);
+      }
+      console.log(`接口查询: GET /bookings/recurring/${recurringSeriesId}`);
+      console.log(`取消第2条及之后: POST /bookings/<第2条预约ID>/cancel-recurring  body: { mode: 'single_and_after', cancelReason: '示例取消' }`);
+      console.log(`==============================================\n`);
+    } else {
+      console.log(`重复预约演示数据已存在 [${recurringSeriesId}]，跳过创建`);
+    }
+  }
+
   console.log('\n预置数据完成！');
   console.log(`会议室数量: ${rooms.length}`);
   console.log(`预约记录数量: ${allBookings.length}`);
@@ -961,6 +1109,10 @@ async function main() {
   console.log(`已签到访客: ${demoVisitors.filter(v => v.status === 'checked_in').length}条`);
   console.log(`待签到访客: ${demoVisitors.filter(v => v.status === 'pending').length}条`);
   console.log(`已失效访客: ${demoVisitors.filter(v => v.status === 'invalidated').length}条`);
+  console.log(`\n重复预约演示提示:`);
+  console.log(`  查询序列: GET /bookings/recurring/rec_demo_daily_standup`);
+  console.log(`  序列模式: daily 每日重复，共5天(今天起+4天)，第3天因冲突被跳过`);
+  console.log(`  体验批量取消: 先查询序列获取预约ID，对第2条调用 /cancel-recurring 接口，mode=single_and_after`);
 }
 
 main()

@@ -1,8 +1,45 @@
 import { Router, Request, Response } from 'express';
 import * as bookingService from '../services/bookingService';
+import * as recurringBookingService from '../services/recurringBookingService';
 import * as checkInService from '../services/checkInService';
 
 const router = Router();
+
+router.post('/recurring', async (req: Request, res: Response) => {
+  try {
+    const result = await recurringBookingService.createRecurringBooking(req.body);
+    if (!result.success) {
+      return res.status(400).json({ success: false, errors: result.errors });
+    }
+    res.status(201).json(result);
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/recurring/:seriesId', async (req: Request, res: Response) => {
+  try {
+    const result = await recurringBookingService.getBookingsByRecurringSeriesId(req.params.seriesId);
+    if (!result.success) {
+      return res.status(404).json({ success: false, errors: result.errors });
+    }
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/:id/cancel-recurring', async (req: Request, res: Response) => {
+  try {
+    const result = await recurringBookingService.cancelRecurringBooking(req.params.id, req.body);
+    if (!result.success) {
+      return res.status(400).json({ success: false, errors: result.errors });
+    }
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 router.post('/', async (req: Request, res: Response) => {
   try {

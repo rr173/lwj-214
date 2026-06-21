@@ -77,6 +77,10 @@ model Booking {
   releasedAt               DateTime?
   convertedFromWaitlistId  String?
   convertedFromWaitlistAt  DateTime?
+  recurringSeriesId        String?
+  recurringPattern         String?
+  recurringEndDate         String?
+  recurringIndex           Int?
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 

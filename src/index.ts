@@ -39,9 +39,12 @@ app.get('/', (req, res) => {
         'GET /api/bookings/:id': '查询预约详情',
         'GET /api/bookings/room/:roomNumber/:date': '查询某房间某天的预约',
         'GET /api/bookings/range/:startDate/:endDate': '查询日期范围内的预约',
-        'PUT /api/bookings/:id': '修改预约（多退少补差价）',
+        'PUT /api/bookings/:id': '修改预约（多退少补差价，修改单条不影响序列其他）',
         'POST /api/bookings/:id/cancel': '取消预约（按时间比例退费）',
-        'POST /api/bookings/:id/checkin': '签到'
+        'POST /api/bookings/:id/checkin': '签到',
+        'POST /api/bookings/recurring': '创建重复预约（daily/weekly/biweekly，最远30天，自动跳过冲突）',
+        'GET /api/bookings/recurring/:seriesId': '查询某个序列的全部预约列表（含已取消，标明状态）',
+        'POST /api/bookings/:id/cancel-recurring': '取消重复预约（mode: single仅取消本条 / single_and_after取消本条及之后所有）'
       },
       waitlist: {
         'POST /api/waitlist': '创建候补',

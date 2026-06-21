@@ -33,6 +33,8 @@ export interface RoomStatistics {
   effectiveCancellationRate: number;
   totalVisitors: number;
   dailyAverageVisitors: number;
+  recurringBookings: number;
+  recurringBookingRate: number;
 }
 
 export async function getWeeklyStatistics(input: StatisticsInput) {
@@ -111,6 +113,7 @@ export async function getWeeklyStatistics(input: StatisticsInput) {
     const noShowReleasedBookings = bookings.filter(b => b.isReleased);
     const waitlistConvertedBookings = bookings.filter(b => b.convertedFromWaitlistId !== null && !b.isCancelled);
     const activeBookings = bookings.filter(b => !b.isCancelled);
+    const recurringBookings = bookings.filter(b => b.recurringSeriesId !== null);
 
     let totalBookedMinutes = 0;
     const hourCounts = new Map<string, number>();
@@ -170,7 +173,9 @@ export async function getWeeklyStatistics(input: StatisticsInput) {
       effectiveBookings,
       effectiveCancellationRate: Math.round(effectiveCancellationRate * 100) / 100,
       totalVisitors,
-      dailyAverageVisitors: Math.round(dailyAverageVisitors * 100) / 100
+      dailyAverageVisitors: Math.round(dailyAverageVisitors * 100) / 100,
+      recurringBookings: recurringBookings.length,
+      recurringBookingRate: totalBookings > 0 ? Math.round((recurringBookings.length / totalBookings) * 10000) / 100 : 0
     };
   }
 
@@ -193,6 +198,12 @@ export async function getWeeklyStatistics(input: StatisticsInput) {
   const allNoShowReleased = allBookings.filter(b => b.isReleased);
   const allWaitlistConverted = allBookings.filter(b => b.convertedFromWaitlistId !== null && !b.isCancelled);
   const allActive = allBookings.filter(b => !b.isCancelled);
+  const allRecurringBookings = allBookings.filter(b => b.recurringSeriesId !== null);
+
+  const recurringSeriesSet = new Set<string>();
+  allRecurringBookings.forEach(b => {
+    if (b.recurringSeriesId) recurringSeriesSet.add(b.recurringSeriesId);
+  });
 
   const overallStats = {
     dateRange: {
@@ -207,6 +218,11 @@ export async function getWeeklyStatistics(input: StatisticsInput) {
     totalNoShowReleasedBookings: allNoShowReleased.length,
     totalWaitlistConvertedBookings: allWaitlistConverted.length,
     totalVisitors: allVisitors.length,
+    totalRecurringBookings: allRecurringBookings.length,
+    totalRecurringSeries: recurringSeriesSet.size,
+    recurringBookingRate: allBookings.length > 0
+      ? Math.round((allRecurringBookings.length / allBookings.length) * 10000) / 100
+      : 0,
     overallDailyAverageVisitors: totalDays > 0
       ? Math.round((allVisitors.length / totalDays) * 100) / 100
       : 0,
