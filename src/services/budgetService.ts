@@ -204,8 +204,8 @@ export async function getRoomMonthRevenue(roomNumber?: string, monthKey?: string
       });
     }
     const stat = roomRevenueMap.get(record.roomNumber)!;
+    stat.totalRevenue += record.amount;
     if (record.amount > 0) {
-      stat.totalRevenue += record.amount;
       stat.peakRevenue += record.peakHoursCost;
       stat.offPeakRevenue += record.offPeakHoursCost;
       stat.peakMinutes += record.peakMinutes;
