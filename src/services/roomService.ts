@@ -6,6 +6,8 @@ export interface RoomWithFacilities extends MeetingRoom {
   facilities: string[];
   splitStatus: string;
   parentRoomId: string | null;
+  isUnderMaintenance: boolean;
+  maintenanceStartDate: string | null;
 }
 
 export interface CreateRoomInput {

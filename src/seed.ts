@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { format, addDays, subMinutes, addMinutes } from 'date-fns';
+import { format, addDays, subMinutes, addMinutes, subDays, subHours } from 'date-fns';
 import { calculateCost } from './services/billingService';
 
 const prisma = new PrismaClient();
@@ -666,6 +666,142 @@ async function main() {
       }
     } else {
       console.log(`跳过访客，关联预约不存在: ${visitor.visitorName} - ${visitor.bookingTopic}`);
+    }
+  }
+
+  const m201Room = allRooms.find(r => r.roomNumber === 'M201');
+  if (m201Room) {
+    const existingTickets = await prisma.maintenanceTicket.findMany({
+      where: { roomNumber: 'M201' }
+    });
+
+    if (existingTickets.length === 0) {
+      const historicalTicket = await prisma.maintenanceTicket.create({
+        data: {
+          roomId: m201Room.id,
+          roomNumber: 'M201',
+          facilityTag: '白板',
+          description: '白板笔书写不流畅，需要更换白板笔和清洁白板',
+          reporterName: '孙七',
+          urgency: 'normal',
+          status: 'closed',
+          assignee: '王师傅',
+          estimatedFixDate: format(subDays(new Date(), 5), 'yyyy-MM-dd'),
+          submittedAt: subDays(new Date(), 7),
+          assignedAt: subDays(new Date(), 6),
+          completedAt: subDays(new Date(), 5),
+          closedAt: subDays(new Date(), 5)
+        }
+      });
+      console.log(`创建历史工单: M201 白板故障 [已关闭]`);
+
+      const activeUrgentTicket = await prisma.maintenanceTicket.create({
+        data: {
+          roomId: m201Room.id,
+          roomNumber: 'M201',
+          facilityTag: '投影仪',
+          description: '投影仪无法开机，指示灯不亮，疑似电源模块故障',
+          reporterName: '赵六',
+          urgency: 'urgent',
+          status: 'in_repair',
+          assignee: '李工程师',
+          estimatedFixDate: tomorrow,
+          submittedAt: subHours(new Date(), 2),
+          assignedAt: subHours(new Date(), 1)
+        }
+      });
+      console.log(`创建紧急工单: M201 投影仪故障 [维修中]`);
+
+      await prisma.meetingRoom.update({
+        where: { id: m201Room.id },
+        data: {
+          isUnderMaintenance: true,
+          maintenanceStartDate: today
+        }
+      });
+      console.log(`设置 M201 为维护状态`);
+
+      const todayBookings = await prisma.booking.findMany({
+        where: {
+          roomId: m201Room.id,
+          date: today,
+          isCancelled: false,
+          isReleased: false
+        }
+      });
+
+      const now = new Date();
+      const nowTime = format(now, 'HH:mm');
+
+      for (const booking of todayBookings) {
+        if (booking.startTime > nowTime) {
+          await prisma.booking.update({
+            where: { id: booking.id },
+            data: {
+              isCancelled: true,
+              cancelledAt: new Date(),
+              cancelReason: '设备维护，房间临时关闭'
+            }
+          });
+          console.log(`取消 M201 今日预约: ${booking.topic} (${booking.startTime}-${booking.endTime})`);
+
+          await prisma.bookingLog.create({
+            data: {
+              date: booking.date,
+              type: 'booking_cancelled',
+              bookingId: booking.id,
+              description: `预约取消: ${booking.bookerName} 的预约(M201 ${booking.date} ${booking.startTime}-${booking.endTime})因设备维护被取消`
+            }
+          });
+        }
+      }
+
+      const tomorrowBookings = await prisma.booking.findMany({
+        where: {
+          roomId: m201Room.id,
+          date: { gte: tomorrow },
+          isCancelled: false,
+          isReleased: false
+        }
+      });
+
+      for (const booking of tomorrowBookings) {
+        await prisma.booking.update({
+          where: { id: booking.id },
+          data: {
+            isCancelled: true,
+            cancelledAt: new Date(),
+            cancelReason: '设备维护，房间临时关闭'
+          }
+        });
+        console.log(`取消 M201 未来预约: ${booking.topic} (${booking.date} ${booking.startTime}-${booking.endTime})`);
+
+        await prisma.bookingLog.create({
+          data: {
+            date: booking.date,
+            type: 'booking_cancelled',
+            bookingId: booking.id,
+            description: `预约取消: ${booking.bookerName} 的预约(M201 ${booking.date} ${booking.startTime}-${booking.endTime})因设备维护被取消`
+          }
+        });
+      }
+
+      const affectedWaitlists = await prisma.waitlist.findMany({
+        where: {
+          roomId: m201Room.id,
+          status: 'pending'
+        }
+      });
+
+      for (const wl of affectedWaitlists) {
+        await prisma.waitlist.update({
+          where: { id: wl.id },
+          data: { status: 'cancelled', updatedAt: new Date() }
+        });
+        console.log(`取消 M201 候补: ${wl.bookerName} (${wl.date} ${wl.startTime}-${wl.endTime})`);
+      }
+    } else {
+      console.log('维护工单已存在，跳过创建');
     }
   }
 

@@ -150,6 +150,22 @@ export async function createBooking(input: CreateBookingInput) {
     };
   }
 
+  if (room.isUnderMaintenance) {
+    const today = new Date().toISOString().split('T')[0];
+    if (room.maintenanceStartDate && room.maintenanceStartDate <= today) {
+      return {
+        success: false,
+        errors: [{ field: 'roomNumber', message: `会议室 ${input.roomNumber} 正在维护中，无法预约` }]
+      };
+    }
+    if (room.maintenanceStartDate && input.date >= room.maintenanceStartDate) {
+      return {
+        success: false,
+        errors: [{ field: 'date', message: `会议室 ${input.roomNumber} 将于 ${room.maintenanceStartDate} 起维护，该日期无法预约` }]
+      };
+    }
+  }
+
   const attendeeErr = validateAttendeeCount(input.attendeeCount, room.capacity);
   if (attendeeErr) {
     return { success: false, errors: [attendeeErr] };

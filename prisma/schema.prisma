@@ -8,23 +8,26 @@ datasource db {
 }
 
 model MeetingRoom {
-  id             String              @id @default(uuid())
-  roomNumber     String              @unique
-  name           String
-  capacity       Int
-  floor          Int
-  isActive       Boolean             @default(true)
-  splitStatus    String              @default("normal")
-  parentRoomId   String?
-  parentRoom     MeetingRoom?        @relation("RoomSplits", fields: [parentRoomId], references: [id])
-  subRooms       MeetingRoom[]       @relation("RoomSplits")
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  id                 String              @id @default(uuid())
+  roomNumber         String              @unique
+  name               String
+  capacity           Int
+  floor              Int
+  isActive           Boolean             @default(true)
+  isUnderMaintenance Boolean             @default(false)
+  maintenanceStartDate String?
+  splitStatus        String              @default("normal")
+  parentRoomId       String?
+  parentRoom         MeetingRoom?        @relation("RoomSplits", fields: [parentRoomId], references: [id])
+  subRooms           MeetingRoom[]       @relation("RoomSplits")
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 
-  facilities     RoomFacility[]
-  bookings       Booking[]
-  waitlists      Waitlist[]
-  billingRecords BillingRecord[]
+  facilities         RoomFacility[]
+  bookings           Booking[]
+  waitlists          Waitlist[]
+  billingRecords     BillingRecord[]
+  maintenanceTickets MaintenanceTicket[]
 }
 
 model Department {
@@ -160,4 +163,25 @@ model BookingLog {
 
   booking       Booking?  @relation(fields: [bookingId], references: [id])
   waitlist      Waitlist? @relation(fields: [waitlistId], references: [id])
+}
+
+model MaintenanceTicket {
+  id                String    @id @default(uuid())
+  roomId            String
+  roomNumber        String
+  facilityTag       String
+  description       String
+  reporterName      String
+  urgency           String
+  status            String    @default("pending_assignment")
+  assignee          String?
+  estimatedFixDate  String?
+  submittedAt       DateTime  @default(now())
+  assignedAt        DateTime?
+  completedAt       DateTime?
+  closedAt          DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  room              MeetingRoom @relation(fields: [roomId], references: [id])
 }

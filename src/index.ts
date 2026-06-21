@@ -7,6 +7,7 @@ import statisticsRouter from './routes/statistics';
 import waitlistRouter from './routes/waitlist';
 import visitorsRouter from './routes/visitors';
 import budgetRouter from './routes/budget';
+import maintenanceRouter from './routes/maintenance';
 import { startScheduler, stopScheduler } from './services/schedulerService';
 import prisma from './prisma';
 
@@ -75,6 +76,16 @@ app.get('/', (req, res) => {
         'GET /api/budget/ranking/departments?month=YYYY-MM': '某月全部门费用排行',
         'GET /api/budget/revenue/rooms?roomNumber=XXX&month=YYYY-MM': '会议室月度收入统计',
         'POST /api/budget/calculate': '试算预约费用'
+      },
+      maintenance: {
+        'POST /api/maintenance/tickets': '提交报修工单',
+        'GET /api/maintenance/tickets': '查询全部工单（支持按状态/紧急程度/房间筛选）',
+        'GET /api/maintenance/tickets/:id': '查询工单详情',
+        'GET /api/maintenance/tickets/room/:roomNumber': '查询某房间的历史工单',
+        'POST /api/maintenance/tickets/:id/assign': '管理员指派维修人员和预计修复时间',
+        'POST /api/maintenance/tickets/:id/complete': '完成维修',
+        'POST /api/maintenance/tickets/:id/close': '关闭工单，房间恢复可用',
+        'GET /api/maintenance/statistics/average-repair-time': '统计每间房间的平均维修时长'
       }
     }
   });
@@ -88,6 +99,7 @@ app.use('/api/statistics', statisticsRouter);
 app.use('/api/waitlist', waitlistRouter);
 app.use('/api/visitors', visitorsRouter);
 app.use('/api/budget', budgetRouter);
+app.use('/api/maintenance', maintenanceRouter);
 
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error(err.stack);

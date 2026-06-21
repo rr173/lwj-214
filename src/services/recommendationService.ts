@@ -134,8 +134,14 @@ export async function getRecommendations(input: RecommendationInput) {
     isActive: true
   });
 
+  const availableRooms = candidateRooms.filter(room => {
+    if (!room.isUnderMaintenance) return true;
+    if (!room.maintenanceStartDate) return true;
+    return input.date < room.maintenanceStartDate;
+  });
+
   const bookingsByRoom = new Map<string, Booking[]>();
-  for (const room of candidateRooms) {
+  for (const room of availableRooms) {
     const bookings = await prisma.booking.findMany({
       where: { roomId: room.id, date: input.date, isCancelled: false }
     });
@@ -145,7 +151,7 @@ export async function getRecommendations(input: RecommendationInput) {
   const exactMatches: RecommendedRoom[] = [];
   const nearMatches: RecommendedRoom[] = [];
 
-  for (const room of candidateRooms) {
+  for (const room of availableRooms) {
     const bookings = bookingsByRoom.get(room.id) || [];
     const availableSlots = getAvailableSlots(bookings, input.startTime, input.endTime);
 
