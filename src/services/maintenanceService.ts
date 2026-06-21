@@ -106,21 +106,35 @@ async function cancelBookingsAndProcessWaitlists(roomId: string, startDate: stri
   const today = getToday();
   const now = new Date();
 
-  const bookingsToCancel = await prisma.booking.findMany({
-    where: {
-      roomId,
-      isCancelled: false,
-      isReleased: false,
-      OR: [
-        { date: { gt: startDate } },
-        {
-          date: startDate,
-          startTime: { gt: format(now, 'HH:mm') }
-        }
-      ]
-    },
-    orderBy: [{ date: 'asc' }, { startTime: 'asc' }]
-  });
+  let bookingsToCancel;
+
+  if (startDate > today) {
+    bookingsToCancel = await prisma.booking.findMany({
+      where: {
+        roomId,
+        isCancelled: false,
+        isReleased: false,
+        date: { gte: startDate }
+      },
+      orderBy: [{ date: 'asc' }, { startTime: 'asc' }]
+    });
+  } else {
+    bookingsToCancel = await prisma.booking.findMany({
+      where: {
+        roomId,
+        isCancelled: false,
+        isReleased: false,
+        OR: [
+          { date: { gt: startDate } },
+          {
+            date: startDate,
+            startTime: { gt: format(now, 'HH:mm') }
+          }
+        ]
+      },
+      orderBy: [{ date: 'asc' }, { startTime: 'asc' }]
+    });
+  }
 
   const results: any[] = [];
 
@@ -301,18 +315,28 @@ export async function createTicket(input: CreateTicketInput) {
     });
 
     maintenanceEffect = await cancelBookingsAndProcessWaitlists(room.id, today);
-
-    await prisma.maintenanceTicket.update({
-      where: { id: ticket.id },
-      data: { status: TICKET_STATUS.IN_REPAIR }
+  } else if (input.urgency === URGENCY.NORMAL) {
+    const tomorrow = getTomorrow();
+    await prisma.meetingRoom.update({
+      where: { id: room.id },
+      data: {
+        isUnderMaintenance: true,
+        maintenanceStartDate: tomorrow
+      }
     });
-    ticket.status = TICKET_STATUS.IN_REPAIR;
+
+    maintenanceEffect = await cancelBookingsAndProcessWaitlists(room.id, tomorrow);
   }
+
+  const updatedTicket = await prisma.maintenanceTicket.findUnique({
+    where: { id: ticket.id },
+    include: { room: true }
+  });
 
   return {
     success: true,
     data: {
-      ticket,
+      ticket: updatedTicket,
       maintenanceEffect
     }
   };
@@ -356,23 +380,6 @@ export async function assignTicket(input: AssignTicketInput) {
     },
     include: { room: true }
   });
-
-  if (ticket.urgency === URGENCY.NORMAL) {
-    const tomorrow = getTomorrow();
-    const room = await prisma.meetingRoom.findUnique({ where: { id: ticket.roomId } });
-    if (room && !room.isUnderMaintenance) {
-      await prisma.meetingRoom.update({
-        where: { id: ticket.roomId },
-        data: {
-          isUnderMaintenance: true,
-          maintenanceStartDate: tomorrow
-        }
-      });
-
-      const effect = await cancelBookingsAndProcessWaitlists(ticket.roomId, tomorrow);
-      return { success: true, data: { ticket: updated, maintenanceEffect: effect } };
-    }
-  }
 
   return { success: true, data: { ticket: updated } };
 }
